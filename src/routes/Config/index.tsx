@@ -10,6 +10,7 @@ import { testJellyfinConnection } from "@/lib/jellyfin";
 import { notify } from "@/lib/notify";
 import { listWatches } from "@/lib/watches";
 import { isAutostartEnabled, setAutostart } from "@/lib/autostart";
+import { getVersion } from "@tauri-apps/api/app";
 import { ffmpegInstall, ffmpegStatus } from "@/lib/tools";
 import { IrreversibleToggle } from "@/components/shared/IrreversibleToggle";
 import {
@@ -285,6 +286,7 @@ export default function Config() {
   const { data: watches } = useQuery({ queryKey: ["watches"], queryFn: listWatches });
   const sampleCover = watches?.find((w) => w.cover_url)?.cover_url;
 
+  const { data: appVersion } = useQuery({ queryKey: ["app-version"], queryFn: getVersion, staleTime: Infinity });
   const { data: autostartEnabled } = useQuery({
     queryKey: ["autostart"],
     queryFn: isAutostartEnabled,
@@ -802,7 +804,7 @@ export default function Config() {
                 <>
                   <SettingsGroup title="Torii">
                     <SettingRow label={t("config.about.version")}>
-                      <span className="text-xs text-[#8A8F9C]">0.1.0</span>
+                      <span className="text-xs text-[#8A8F9C]">{appVersion ?? "…"}</span>
                     </SettingRow>
                     <SettingRow label="Stack">
                       <span className="text-xs text-[#8A8F9C]">Tauri v2 · Rust · React</span>
