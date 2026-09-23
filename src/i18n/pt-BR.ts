@@ -233,7 +233,6 @@ const ptBR = {
     pausedBadge: "PAUSADO",
     seasonCount_one: "{{count}} temporada",
     seasonCount_other: "{{count}} temporadas",
-    openPage: "Abrir página do anime",
     openPageOf: "Abrir página de {{title}}",
     noRating: "Sem nota",
     episodesUnknown: "Episódios: ?",

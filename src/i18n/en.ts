@@ -232,7 +232,6 @@ const en: Translation = {
     pausedBadge: "PAUSED",
     seasonCount_one: "{{count}} season",
     seasonCount_other: "{{count}} seasons",
-    openPage: "Open anime page",
     openPageOf: "Open {{title}} page",
     noRating: "No rating",
     episodesUnknown: "Episodes: ?",
