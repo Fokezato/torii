@@ -236,6 +236,11 @@ const en: Translation = {
     openPageOf: "Open {{title}} page",
     noRating: "No rating",
     episodesUnknown: "Episodes: ?",
+    continueWatching: "Continue watching",
+    resume: "Resume {{title}}",
+    upNext: "Up next",
+    timeLeft_one: "{{count}} min left",
+    timeLeft_other: "{{count}} min left",
   },
   languagePicker: {
     add: "Add language",

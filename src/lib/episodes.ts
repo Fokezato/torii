@@ -23,6 +23,8 @@ export interface Episode {
   watch_position_ms: number | null;
   /** Quando foi assistido até o encerramento/90% (ISO). */
   watched_at: string | null;
+  /** Última vez que o player salvou progresso (ISO). */
+  watch_progress_at: string | null;
 }
 
 export interface DownloadProgress {
@@ -39,6 +41,11 @@ export interface DownloadProgress {
 
 export async function listRecentEpisodes(): Promise<Episode[]> {
   return invoke<Episode[]>("list_recent_episodes");
+}
+
+/** Todos os episódios prontos pra assistir, de todos os animes. */
+export async function listAvailableEpisodes(): Promise<Episode[]> {
+  return invoke<Episode[]>("list_available_episodes");
 }
 
 export async function listWatchEpisodes(watchId: number): Promise<Episode[]> {

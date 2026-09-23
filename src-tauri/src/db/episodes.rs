@@ -26,6 +26,8 @@ pub struct Episode {
     pub audio_processed_at: Option<String>,
     /// Quando passou pelo "reduzir resolução" (ver `downscale`).
     pub video_processed_at: Option<String>,
+    /// Última vez que o player salvou progresso (ordena o "Continuar assistindo").
+    pub watch_progress_at: Option<String>,
 }
 
 pub struct NewEpisode<'a> {
@@ -174,6 +176,13 @@ pub async fn list_recent(pool: &SqlitePool, limit: i64) -> Result<Vec<Episode>, 
         .await
 }
 
+/// Todos os episódios prontos pra assistir (base do "Continuar assistindo").
+pub async fn list_available(pool: &SqlitePool) -> Result<Vec<Episode>, sqlx::Error> {
+    sqlx::query_as::<_, Episode>("SELECT * FROM episodes WHERE status = 'available'")
+        .fetch_all(pool)
+        .await
+}
+
 pub async fn list_for_watch(pool: &SqlitePool, watch_id: i64) -> Result<Vec<Episode>, sqlx::Error> {
     sqlx::query_as::<_, Episode>("SELECT * FROM episodes WHERE watch_id = ? ORDER BY added_at DESC")
         .bind(watch_id)
@@ -284,11 +293,12 @@ pub async fn save_progress(
 ) -> Result<(), sqlx::Error> {
     let now = chrono::Utc::now().to_rfc3339();
     sqlx::query(
-        "UPDATE episodes SET watch_position_ms = ?, \
+        "UPDATE episodes SET watch_position_ms = ?, watch_progress_at = ?, \
          watched_at = CASE WHEN ? THEN COALESCE(watched_at, ?) ELSE watched_at END \
          WHERE watch_id = ? AND episode_number = ? AND status = 'available'",
     )
     .bind(position_ms)
+    .bind(&now)
     .bind(watched)
     .bind(&now)
     .bind(watch_id)

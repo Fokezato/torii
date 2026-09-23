@@ -7,6 +7,11 @@ pub async fn list_recent_episodes(state: State<'_, AppState>) -> Result<Vec<Epis
 }
 
 #[tauri::command]
+pub async fn list_available_episodes(state: State<'_, AppState>) -> Result<Vec<Episode>, AppError> {
+    Ok(db::episodes::list_available(&state.db).await?)
+}
+
+#[tauri::command]
 pub async fn list_watch_episodes(
     state: State<'_, AppState>,
     watch_id: i64,
