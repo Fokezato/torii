@@ -21,7 +21,6 @@
 <p align="center">
   <a href="#-features">Features</a> ·
   <a href="#-installation">Installation</a> ·
-  <a href="#%EF%B8%8F-keyboard-shortcuts">Shortcuts</a> ·
   <a href="#%EF%B8%8F-building-from-source">Building</a> ·
   <a href="#-license">License</a>
 </p>
@@ -53,22 +52,6 @@
 > The installer is not code-signed yet, so Windows shows a blue **"Windows protected your PC"** screen. Click **More info → Run anyway**.
 
 **Requirements:** Windows 10 or 11 (64-bit). [WebView2](https://developer.microsoft.com/microsoft-edge/webview2/) is required and comes preinstalled on Windows 11; the installer downloads it if it's missing.
-
-## ⌨️ Keyboard shortcuts
-
-| Key | Action |
-| --- | --- |
-| <kbd>K</kbd> / <kbd>Space</kbd> | Play / pause |
-| <kbd>J</kbd> / <kbd>L</kbd> | Back / forward 10 seconds |
-| <kbd>←</kbd> / <kbd>→</kbd> | Back / forward 5 seconds |
-| <kbd>↑</kbd> / <kbd>↓</kbd> | Volume up / down |
-| <kbd>M</kbd> | Mute |
-| <kbd>F</kbd> | Fullscreen |
-| <kbd>Esc</kbd> | Exit fullscreen |
-| <kbd>0</kbd> – <kbd>9</kbd> | Jump to 0% – 90% of the episode |
-| <kbd>Shift</kbd> + <kbd>N</kbd> | Next episode |
-
-The Windows media keys (play/pause, next) work too, even when Torii isn't focused.
 
 ## 🛠️ Building from source
 
