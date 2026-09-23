@@ -1,4 +1,4 @@
-import { Bookmark, Check, Loader2, MoreHorizontal, Play, Star } from "lucide-react";
+import { Bookmark, Check, Info, Loader2, Play, Star } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { Watch } from "@/lib/watches";
 import { listStatusLabel } from "@/lib/constants";
@@ -26,9 +26,9 @@ export function LibraryCard({
   seasonCount = 1,
 }: {
   watch: Watch;
-  /** Clique no card: abre o player continuando de onde parou. */
+  /** "Continuar" (hover): abre o player continuando de onde parou. */
   onPlay: () => void;
-  /** "⋯" no canto (aparece no hover): abre a página do anime. */
+  /** "Ver anime" (hover): abre a página do anime. */
   onOpenDetails: () => void;
   playLoading?: boolean;
   width?: number;
@@ -45,13 +45,9 @@ export function LibraryCard({
 
   return (
     <article className="shrink-0 space-y-2.5" style={{ width }}>
-      <div className="group relative" style={{ width, height }}>
-      <button
-        type="button"
-        onClick={onPlay}
-        aria-label={t("library.watch", { title: displayTitle })}
+      <div
+        className="group relative overflow-hidden rounded-xl bg-secondary shadow-[0_4px_16px_rgba(0,0,0,0.4)] ring-1 ring-white/5 transition-shadow duration-200 hover:shadow-[0_12px_32px_rgba(0,0,0,0.55)] hover:ring-white/15"
         style={{ width, height }}
-        className="relative block overflow-hidden rounded-xl bg-secondary shadow-[0_4px_16px_rgba(0,0,0,0.4)] ring-1 ring-white/5 transition-shadow duration-200 group-hover:shadow-[0_12px_32px_rgba(0,0,0,0.55)] group-hover:ring-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
       >
         {watch.cover_url ? (
           <img
@@ -64,7 +60,6 @@ export function LibraryCard({
             {displayTitle}
           </div>
         )}
-        <div className="absolute inset-0 bg-black/0 transition-colors duration-200 group-hover:bg-black/30" />
 
         <span
           className={`absolute top-2 left-2 flex items-center gap-1 rounded-[5px] px-1.5 py-0.5 text-[9px] font-bold tracking-wide uppercase ${BADGE_STYLE[watch.list_status] ?? "bg-black/45 text-white"}`}
@@ -84,28 +79,29 @@ export function LibraryCard({
         )}
 
         <div
-          className={`absolute inset-0 flex items-center justify-center transition-opacity duration-200 group-hover:opacity-100 ${
+          className={`absolute inset-0 flex items-center justify-center gap-2 bg-black/55 backdrop-blur-[2px] transition-opacity duration-200 group-focus-within:opacity-100 group-hover:opacity-100 ${
             playLoading ? "opacity-100" : "opacity-0"
           }`}
         >
-          <span className="flex size-8 items-center justify-center rounded-full bg-white/90">
-            {playLoading ? (
-              <Loader2 className="size-3.5 animate-spin text-black" />
-            ) : (
-              <Play className="size-3 translate-x-0.5 fill-black text-black" />
-            )}
-          </span>
+          <button
+            type="button"
+            onClick={onPlay}
+            aria-label={t("library.watch", { title: displayTitle })}
+            className="flex items-center gap-1.5 rounded-lg bg-white px-3.5 py-2 text-xs font-semibold text-black transition-opacity hover:opacity-90"
+          >
+            {playLoading ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5 fill-black" />}
+            {t("home.continue")}
+          </button>
+          <button
+            type="button"
+            onClick={onOpenDetails}
+            aria-label={t("library.openPageOf", { title: displayTitle })}
+            className="flex items-center gap-1.5 rounded-lg border border-white/30 bg-black/40 px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-white/15"
+          >
+            <Info className="size-3.5" />
+            {t("home.viewAnime")}
+          </button>
         </div>
-      </button>
-      <button
-        type="button"
-        aria-label={t("library.openPageOf", { title: displayTitle })}
-        title={t("library.openPage")}
-        onClick={onOpenDetails}
-        className="absolute right-2 bottom-2 flex size-7 items-center justify-center rounded-full bg-black/65 text-white opacity-0 transition-all duration-200 group-hover:opacity-100 hover:bg-black/85 focus-visible:opacity-100"
-      >
-        <MoreHorizontal className="size-4" />
-      </button>
       </div>
 
       <div className="space-y-1.5">
