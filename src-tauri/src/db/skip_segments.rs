@@ -14,19 +14,40 @@ pub struct SkipSegments {
     pub recap_end_ms: Option<i64>,
 }
 
+impl SkipSegments {
+    /// Abertura e encerramento achados — não vale a pena perguntar de novo.
+    pub fn is_complete(&self) -> bool {
+        self.intro_start_ms.is_some() && self.ending_start_ms.is_some()
+    }
+}
+
+#[derive(FromRow)]
+struct CachedRow {
+    #[sqlx(flatten)]
+    segments: SkipSegments,
+    fetched_at: String,
+}
+
+/// Trechos em cache + quando foram buscados.
 pub async fn get_cached(
     pool: &SqlitePool,
     watch_id: i64,
     episode_number: i64,
-) -> Result<Option<SkipSegments>, sqlx::Error> {
-    sqlx::query_as::<_, SkipSegments>(
-        "SELECT intro_start_ms, intro_end_ms, ending_start_ms, ending_end_ms, recap_start_ms, recap_end_ms \
+) -> Result<Option<(SkipSegments, chrono::DateTime<chrono::Utc>)>, sqlx::Error> {
+    let row = sqlx::query_as::<_, CachedRow>(
+        "SELECT intro_start_ms, intro_end_ms, ending_start_ms, ending_end_ms, recap_start_ms, recap_end_ms, fetched_at \
          FROM skip_segments WHERE watch_id = ? AND episode_number = ?",
     )
     .bind(watch_id)
     .bind(episode_number)
     .fetch_optional(pool)
-    .await
+    .await?;
+    Ok(row.map(|r| {
+        let at = chrono::DateTime::parse_from_rfc3339(&r.fetched_at)
+            .map(|d| d.with_timezone(&chrono::Utc))
+            .unwrap_or_default();
+        (r.segments, at)
+    }))
 }
 
 pub async fn upsert(

@@ -191,9 +191,15 @@ pub async fn player_get_skip_segments(
     watch_id: i64,
     episode_number: i64,
 ) -> Result<SkipSegments, AppError> {
-    if let Some(cached) = crate::db::skip_segments::get_cached(&app_state.db, watch_id, episode_number).await? {
-        return Ok(cached);
+    // O AniSkip é colaborativo: trecho que falta hoje pode ser marcado por
+    // alguém depois. Resultado incompleto vale 1 dia; completo, pra sempre.
+    let cached = crate::db::skip_segments::get_cached(&app_state.db, watch_id, episode_number).await?;
+    if let Some((segments, fetched_at)) = &cached {
+        if segments.is_complete() || chrono::Utc::now() - *fetched_at < chrono::Duration::days(1) {
+            return Ok(segments.clone());
+        }
     }
+    let fallback = cached.map(|(segments, _)| segments).unwrap_or_default();
 
     // Só grava no cache resposta DEFINITIVA ("não tem dado" de verdade ou os
     // tempos). Erro de rede devolve vazio sem gravar — senão uma falha
@@ -211,9 +217,9 @@ pub async fn player_get_skip_segments(
                     .await?;
                 return Ok(SkipSegments::default());
             }
-            Err(_) => return Ok(SkipSegments::default()),
+            Err(_) => return Ok(fallback),
         },
-        (None, None) => return Ok(SkipSegments::default()),
+        (None, None) => return Ok(fallback),
     };
 
     match crate::sources::aniskip::fetch_skip_times(&app_state.http, mal_id, episode_number).await {
@@ -221,7 +227,7 @@ pub async fn player_get_skip_segments(
             crate::db::skip_segments::upsert(&app_state.db, watch_id, episode_number, &segments).await?;
             Ok(segments)
         }
-        Err(_) => Ok(SkipSegments::default()),
+        Err(_) => Ok(fallback),
     }
 }
 
