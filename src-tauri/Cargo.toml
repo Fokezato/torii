@@ -1,0 +1,75 @@
+[package]
+name = "torii"
+version = "0.1.0"
+description = "A Tauri App"
+authors = ["you"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "torii_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.8", default-features = false, features = ["sqlite", "runtime-tokio", "tls-rustls", "migrate", "macros"] }
+thiserror = "2"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+chrono = "0.4"
+feed-rs = "2"
+scraper = "0.20"
+regex = "1"
+futures = "0.3"
+quick-xml = { version = "0.36", features = ["serialize"] }
+urlencoding = "2"
+tokio = { version = "1", features = ["time", "sync"] }
+librqbit = "9"
+anyhow = "1"
+tauri-plugin-autostart = "2.5.1"
+tauri-plugin-single-instance = "2.4.5"
+libloading = "0.8"
+jpeg-encoder = "0.6"
+base64 = "0.22"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+sha2 = "0.10"
+hex = "0.4"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
+    # Controle de mídia do Windows (teclas de mídia + painel de mídia do
+    # sistema) pro player — ver src/player/media_session.rs.
+    "Win32_System_WinRT",
+    "Media",
+    "Foundation",
+] }
+
+
+# line-tables-only mantém file:line em panic/backtrace (é o que usamos pra
+# debugar esse projeto inteiro, via eprintln!/erro) mas corta a maior parte
+# do peso de símbolo de debug completo (tipo/variável) que ninguém usa sem
+# debugger de verdade — profile dev tava em 40GB só de acumular rebuild.
+[profile.dev]
+debug = "line-tables-only"
+
+# Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true

@@ -1,0 +1,10 @@
+pub mod activity;
+pub mod episodes;
+pub mod jellyfin;
+pub mod nyaa;
+pub mod player;
+pub mod season;
+pub mod settings;
+pub mod stats;
+pub mod tools;
+pub mod watches;
