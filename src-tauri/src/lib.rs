@@ -337,6 +337,7 @@ pub fn run() {
             commands::nyaa::nyaa_available_languages,
             commands::activity::get_activity_log,
             commands::episodes::list_recent_episodes,
+            commands::episodes::list_available_episodes,
             commands::episodes::list_watch_episodes,
             commands::episodes::pause_episode_download,
             commands::episodes::resume_episode_download,

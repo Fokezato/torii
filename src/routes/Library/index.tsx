@@ -6,6 +6,7 @@ import { groupBySeries, listWatches, type WatchGroup } from "@/lib/watches";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { LibraryCard } from "@/components/library/LibraryCard";
+import { ContinueWatchingRow } from "@/components/library/ContinueWatchingRow";
 import { useSearchStore } from "@/stores/search";
 import { findContinueEpisode, playEpisode } from "@/lib/continueWatching";
 
@@ -157,6 +158,8 @@ export default function Library() {
           </Select>
         </div>
       </div>
+
+      {!search.trim() && <ContinueWatchingRow groups={groups} />}
 
       <nav aria-label={t("library.filter")} className="flex items-center gap-2">
         {FILTERS.map((f) => (

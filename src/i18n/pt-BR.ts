@@ -237,6 +237,11 @@ const ptBR = {
     openPageOf: "Abrir página de {{title}}",
     noRating: "Sem nota",
     episodesUnknown: "Episódios: ?",
+    continueWatching: "Continuar assistindo",
+    resume: "Continuar {{title}}",
+    upNext: "Próximo",
+    timeLeft_one: "Falta {{count}} min",
+    timeLeft_other: "Faltam {{count}} min",
   },
   languagePicker: {
     add: "Adicionar idioma",
