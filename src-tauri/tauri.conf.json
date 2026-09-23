@@ -1,0 +1,42 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Torii",
+  "version": "0.1.0",
+  "identifier": "com.torii.app",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Torii",
+        "width": 1150,
+        "height": 760
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "resources": {
+      "vendor/vlc/libvlc.dll": "libvlc.dll",
+      "vendor/vlc/libvlccore.dll": "libvlccore.dll",
+      "vendor/vlc/plugins/": "plugins/",
+      "vendor/vlc/COPYING.txt": "licenses/libvlc-COPYING.txt",
+      "vendor/vlc/AUTHORS.txt": "licenses/libvlc-AUTHORS.txt"
+    },
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}

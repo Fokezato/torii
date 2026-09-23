@@ -1,0 +1,1 @@
+ALTER TABLE watches ADD COLUMN notify_on_available INTEGER NOT NULL DEFAULT 1;
