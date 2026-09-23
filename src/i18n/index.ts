@@ -15,26 +15,45 @@ export function resolveLanguage(setting?: string | null): AppLanguage {
   return navigator.language.toLowerCase().startsWith("pt") ? "pt-BR" : "en";
 }
 
+const STORAGE_KEY = "torii.language";
+
+function storedSetting(): string | null {
+  try {
+    return localStorage.getItem(STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
 i18n.use(initReactI18next).init({
   resources: { "pt-BR": { translation: ptBR }, en: { translation: en } },
-  lng: resolveLanguage(),
+  lng: resolveLanguage(storedSetting()),
   fallbackLng: "pt-BR",
   interpolation: { escapeValue: false },
 });
 
 function applyLanguage(setting?: string | null) {
+  try {
+    if (setting) localStorage.setItem(STORAGE_KEY, setting);
+  } catch {
+    // Sem storage: só não lembra pro próximo boot.
+  }
   const lng = resolveLanguage(setting);
   document.documentElement.lang = lng;
   if (i18n.language !== lng) i18n.changeLanguage(lng);
 }
 
 /// Cada janela (principal, controles do player, notificação) tem o próprio
-/// i18n: lê a configuração no boot e escuta a troca feita em Config.
-export function syncLanguage() {
-  getSettings()
+/// i18n: lê a configuração no boot e escuta a troca feita em Config. A
+/// promessa resolve quando o idioma salvo já foi aplicado (ou desistiu),
+/// pra tela não nascer no idioma errado.
+export function syncLanguage(): Promise<void> {
+  listen<string>("app:language-changed", (event) => applyLanguage(event.payload)).catch(() => {});
+  const loaded = getSettings()
     .then((s) => applyLanguage(s.app_language))
     .catch(() => {});
-  listen<string>("app:language-changed", (event) => applyLanguage(event.payload)).catch(() => {});
+  const timeout = new Promise<void>((resolve) => setTimeout(resolve, 1500));
+  return Promise.race([loaded, timeout]);
 }
 
 /// Chamado por Config ao trocar o idioma — atualiza as outras janelas.

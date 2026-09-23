@@ -70,3 +70,8 @@ export function listStatusLabel(status: string): string {
 export function listStatusOptions(): { value: string; label: string }[] {
   return LIST_STATUS_VALUES.map((value) => ({ value, label: listStatusLabel(value) }));
 }
+
+/// Gênero da AniList traduzido (gênero desconhecido aparece como veio).
+export function genreLabel(genre: string): string {
+  return tDynamic(`genres.${genre}`, genre);
+}

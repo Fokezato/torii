@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { genreLabel } from "@/lib/constants";
 
 /// Valor do filtro "todos os gêneros" (o rótulo vem da tradução).
 export const ALL_GENRES = "__all__";
@@ -30,7 +31,7 @@ export function GenreFilterBar({ genres, value, onChange }: GenreFilterBarProps)
                 : "bg-secondary text-secondary-foreground hover:bg-secondary/70",
             )}
           >
-            {g === ALL_GENRES ? t("home.allGenres") : g}
+            {g === ALL_GENRES ? t("home.allGenres") : genreLabel(g)}
           </button>
         ))}
       </div>

@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { getAnimeNews } from "@/lib/news";
 import { Skeleton } from "@/components/ui/skeleton";
 import { timeAgo } from "@/lib/format";
+import { TranslatedText } from "@/components/shared/TranslatedText";
 
 export function NewsSection() {
   const { t } = useTranslation();
@@ -43,17 +44,21 @@ export function NewsSection() {
             >
               <div className="flex items-center gap-2 text-[11px] text-[#6C7180]">
                 {item.category && (
-                  <span className="rounded bg-secondary px-1.5 py-0.5 font-medium text-muted-foreground">
-                    {item.category}
-                  </span>
+                  <TranslatedText
+                    as="span"
+                    text={item.category}
+                    className="rounded bg-secondary px-1.5 py-0.5 font-medium text-muted-foreground"
+                  />
                 )}
                 <span>{timeAgo(item.published_at)}</span>
               </div>
-              <h3 className="line-clamp-2 text-sm leading-snug font-semibold group-hover:text-primary">
-                {item.title}
-              </h3>
+              <TranslatedText
+                as="h3"
+                text={item.title}
+                className="line-clamp-2 text-sm leading-snug font-semibold group-hover:text-primary"
+              />
               {item.summary && (
-                <p className="line-clamp-1 text-xs text-muted-foreground">{item.summary}</p>
+                <TranslatedText text={item.summary} className="line-clamp-1 text-xs text-muted-foreground" />
               )}
             </button>
           ))}
