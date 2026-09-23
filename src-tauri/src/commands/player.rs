@@ -12,7 +12,7 @@ fn with_engine<T>(state: &State<'_, PlayerState>, f: impl FnOnce(&PlayerEngine) 
     let guard = state.engine.lock().unwrap();
     let engine = guard
         .as_ref()
-        .ok_or_else(|| AppError::Fetch("player não inicializado (libvlc não carregou)".to_string()))?;
+        .ok_or_else(|| AppError::Fetch(tr!("player não inicializado (libvlc não carregou)", "player not initialized (libvlc failed to load)")))?;
     Ok(f(engine))
 }
 
@@ -34,7 +34,7 @@ pub fn player_open(
     let mut guard = state.engine.lock().unwrap();
     let engine = guard
         .as_mut()
-        .ok_or_else(|| AppError::Fetch("player não inicializado (libvlc não carregou)".to_string()))?;
+        .ok_or_else(|| AppError::Fetch(tr!("player não inicializado (libvlc não carregou)", "player not initialized (libvlc failed to load)")))?;
     engine.open(&source, start_ms).map_err(AppError::Fetch)?;
     engine.play();
     drop(guard);
@@ -140,7 +140,7 @@ pub fn player_snapshot(state: State<'_, PlayerState>) -> Result<PlayerStatus, Ap
 
 fn media_tools(state: &State<'_, PlayerState>) -> Result<MediaTools, AppError> {
     with_engine(state, |e| e.tools())?
-        .ok_or_else(|| AppError::Fetch("leitor de mídia não inicializado".to_string()))
+        .ok_or_else(|| AppError::Fetch(tr!("leitor de mídia não inicializado", "media reader not initialized")))
 }
 
 /// Duração, resolução e faixas de áudio/legenda de um arquivo (painel de

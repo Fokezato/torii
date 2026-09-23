@@ -6,7 +6,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { LanguageTagPicker } from "@/components/anime/LanguageTagPicker";
-import { QUALITIES } from "@/lib/constants";
+import { qualityOptions } from "@/lib/constants";
+import { useTranslation } from "react-i18next";
 import { createWatch } from "@/lib/watches";
 import { getAvailableLanguages } from "@/lib/nyaa";
 import type { AnimeSummary } from "@/lib/anilist";
@@ -51,6 +52,7 @@ function DropdownSelect({
 }
 
 export function WatchFormModal({ anime, onOpenChange }: WatchFormModalProps) {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<Tab>("local");
   const [quality, setQuality] = useState("any");
@@ -135,13 +137,13 @@ export function WatchFormModal({ anime, onOpenChange }: WatchFormModalProps) {
               </div>
               <div className="flex min-w-0 flex-col gap-0.5">
                 <span className="text-[10px] font-bold tracking-wide text-[#6C7180] uppercase">
-                  Adicionar à biblioteca
+                  {t("common.addToLibrary")}
                 </span>
                 <h2 className="truncate text-base font-bold">{anime.title}</h2>
               </div>
               <button
                 type="button"
-                aria-label="Fechar"
+                aria-label={t("common.close")}
                 onClick={() => onOpenChange(false)}
                 className="ml-auto flex size-[30px] shrink-0 items-center justify-center rounded-lg text-[#6C7180] transition-colors hover:bg-white/5 hover:text-foreground"
               >
@@ -151,7 +153,7 @@ export function WatchFormModal({ anime, onOpenChange }: WatchFormModalProps) {
 
             <div
               role="tablist"
-              aria-label="Tipo de disponibilização"
+              aria-label={t("addAnime.mode")}
               className="flex gap-1 border-b border-[#1E212A] px-[22px]"
             >
               <button
@@ -185,20 +187,20 @@ export function WatchFormModal({ anime, onOpenChange }: WatchFormModalProps) {
             {tab === "local" ? (
               <div role="tabpanel" className="flex flex-col gap-[18px] p-[22px]">
                 <div className="flex items-center justify-between gap-5">
-                  <span className="text-[13px] font-semibold">Qualidade</span>
-                  <DropdownSelect value={quality} onChange={setQuality} options={QUALITIES} />
+                  <span className="text-[13px] font-semibold">{t("detail.quality")}</span>
+                  <DropdownSelect value={quality} onChange={setQuality} options={qualityOptions()} />
                 </div>
                 <div className="flex flex-col gap-2">
-                  <span className="text-[13px] font-semibold">Idioma de áudio</span>
+                  <span className="text-[13px] font-semibold">{t("addAnime.audioLanguage")}</span>
                   <LanguageTagPicker selected={audioLangs} onChange={setAudioLangs} available={availableLangs?.audio} />
                 </div>
                 <div className="flex flex-col gap-2">
-                  <span className="text-[13px] font-semibold">Legenda</span>
+                  <span className="text-[13px] font-semibold">{t("detail.subtitle")}</span>
                   <LanguageTagPicker selected={subLangs} onChange={setSubLangs} available={availableLangs?.subtitles} />
                 </div>
                 {availableLangs && availableLangs.audio.length === 0 && availableLangs.subtitles.length === 0 && (
                   <p className="text-[11px] text-[#6C7180]">
-                    Não achei idioma marcado nos releases desse anime — mostrando a lista completa.
+                    {t("addAnime.noLanguagesDetected")}
                   </p>
                 )}
 
@@ -207,15 +209,15 @@ export function WatchFormModal({ anime, onOpenChange }: WatchFormModalProps) {
                 <div className="flex items-center justify-between gap-5">
                   <div className="flex flex-col gap-0.5">
                     <span className="text-[13px] font-semibold">
-                      Baixar novos episódios automaticamente
+                      {t("addAnime.autoDownload")}
                     </span>
-                    <span className="text-[11.5px] text-[#6C7180]">Assim que forem lançados</span>
+                    <span className="text-[11.5px] text-[#6C7180]">{t("addAnime.autoDownloadHint")}</span>
                   </div>
                   <Switch checked={autoDownload} onCheckedChange={setAutoDownload} />
                 </div>
                 <div className="flex items-center justify-between gap-5">
                   <span className="text-[13px] font-semibold">
-                    Notificar quando um episódio estiver pronto
+                    {t("addAnime.notifyReady")}
                   </span>
                   <Switch checked={notify} onCheckedChange={setNotify} />
                 </div>
@@ -229,7 +231,7 @@ export function WatchFormModal({ anime, onOpenChange }: WatchFormModalProps) {
                     aria-expanded={advancedOpen}
                     className="flex items-center justify-between text-[13px] font-semibold text-foreground"
                   >
-                    Avançado
+                    {t("addAnime.advanced")}
                     <ChevronDown
                       className={`size-4 text-[#6C7180] transition-transform ${advancedOpen ? "rotate-180" : ""}`}
                     />
@@ -238,14 +240,14 @@ export function WatchFormModal({ anime, onOpenChange }: WatchFormModalProps) {
                   {advancedOpen && (
                     <div className="flex flex-col gap-3">
                       <div className="flex items-center justify-between">
-                        <span className="text-[13px] font-semibold">Quais episódios baixar</span>
+                        <span className="text-[13px] font-semibold">{t("addAnime.whichEpisodes")}</span>
                         <span className="text-[12px] font-semibold text-primary">
-                          {rangeIsFull ? "Todos" : `Ep ${episodeRange[0]} – ${episodeRange[1]}`}
+                          {rangeIsFull
+                            ? t("addAnime.allEpisodes")
+                            : t("addAnime.episodeRange", { from: episodeRange[0], to: episodeRange[1] })}
                         </span>
                       </div>
-                      <span className="text-[11.5px] text-[#6C7180]">
-                        Arraste as pontas pra pegar só um trecho da temporada.
-                      </span>
+                      <span className="text-[11.5px] text-[#6C7180]">{t("addAnime.rangeHint")}</span>
                       <Slider
                         min={1}
                         max={totalEpisodes}
@@ -255,14 +257,14 @@ export function WatchFormModal({ anime, onOpenChange }: WatchFormModalProps) {
                         className="py-1.5"
                       />
                       <div className="flex items-center justify-between text-[11px] text-[#6C7180]">
-                        <span>Ep 1</span>
-                        <span>Ep {totalEpisodes}</span>
+                        <span>{t("common.episodeShort", { number: 1 })}</span>
+                        <span>{t("common.episodeShort", { number: totalEpisodes })}</span>
                       </div>
 
                       <div className="my-1 h-px bg-[#1E212A]" />
-                      <span className="text-[13px] font-semibold">Reduzir tamanho dos arquivos</span>
+                      <span className="text-[13px] font-semibold">{t("reduceSize.title")}</span>
                       <IrreversibleToggle
-                        feature="strip_audio"
+                        feature="stripAudio"
                         scope="anime"
                         checked={stripAudio}
                         forcedOn={globalStrip}
@@ -281,11 +283,8 @@ export function WatchFormModal({ anime, onOpenChange }: WatchFormModalProps) {
               </div>
             ) : (
               <div role="tabpanel" className="flex flex-col items-center gap-2 p-[22px] py-10 text-center">
-                <p className="text-sm font-semibold">Pseudo-stream ainda não existe</p>
-                <p className="max-w-xs text-xs text-[#6C7180]">
-                  Assistir enquanto baixa e apagar depois fica pra uma fase futura do desenvolvimento.
-                  Por enquanto, use o modo Local.
-                </p>
+                <p className="text-sm font-semibold">{t("addAnime.streamingTitle")}</p>
+                <p className="max-w-xs text-xs text-[#6C7180]">{t("addAnime.streamingText")}</p>
               </div>
             )}
 
@@ -295,7 +294,7 @@ export function WatchFormModal({ anime, onOpenChange }: WatchFormModalProps) {
                 onClick={() => onOpenChange(false)}
                 className="rounded-[10px] border border-[#33374A] px-[18px] py-2.5 text-[13px] font-semibold text-[#9BA0AE] transition-colors hover:text-foreground"
               >
-                Cancelar
+                {t("common.cancel")}
               </button>
               <button
                 type="button"
@@ -303,7 +302,7 @@ export function WatchFormModal({ anime, onOpenChange }: WatchFormModalProps) {
                 onClick={() => mutation.mutate()}
                 className="rounded-[10px] bg-primary px-5 py-2.5 text-[13px] font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
               >
-                {mutation.isPending ? "Adicionando..." : "Adicionar"}
+                {mutation.isPending ? t("addAnime.adding") : t("addAnime.add")}
               </button>
             </div>
           </>

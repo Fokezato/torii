@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { t } from "@/i18n";
 
 export interface AnimeSummary {
   anilist_id: number;
@@ -55,9 +56,9 @@ export function seasonTabLabel(seasonTitle: string, seriesTitle: string | null):
     rest = seasonTitle.slice(seriesTitle.length);
   }
   rest = rest.replace(/^[\s:\-–—.]+/, "").trim();
-  if (!rest) return "Temporada 1";
+  if (!rest) return t("labels.season", { number: 1 });
   return rest
-    .replace(/\bseason\s*(\d+)/i, "Temporada $1")
-    .replace(/(\d+)(?:st|nd|rd|th)\s*season/i, "Temporada $1")
-    .replace(/\bpart\s*(\d+)/i, "Parte $1");
+    .replace(/\bseason\s*(\d+)/i, (_, n) => t("labels.season", { number: Number(n) }))
+    .replace(/(\d+)(?:st|nd|rd|th)\s*season/i, (_, n) => t("labels.season", { number: Number(n) }))
+    .replace(/\bpart\s*(\d+)/i, (_, n) => t("labels.part", { number: Number(n) }));
 }

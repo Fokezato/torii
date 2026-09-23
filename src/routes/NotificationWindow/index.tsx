@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { CheckCircle2, Info, XCircle } from "lucide-react";
 import { playNotificationSound, type NotifyPayload, type ToastVariant } from "@/lib/notify";
+import { useTranslation } from "react-i18next";
 
 const VARIANT_ICON: Record<ToastVariant, typeof Info> = {
   info: Info,
@@ -17,6 +18,7 @@ const VARIANT_COLOR: Record<ToastVariant, string> = {
 const VISIBLE_MS = 5000;
 
 export default function NotificationWindow() {
+  const { t } = useTranslation();
   const [current, setCurrent] = useState<NotifyPayload | null>(null);
   const queueRef = useRef<NotifyPayload[]>([]);
   const showingRef = useRef(false);
@@ -102,7 +104,7 @@ export default function NotificationWindow() {
             <div className="flex items-center gap-1.5 text-[11px] font-semibold text-[#8A8F9C]">
               <span>Torii</span>
               <span aria-hidden="true">·</span>
-              <span>agora</span>
+              <span>{t("notification.now")}</span>
             </div>
             <span className="truncate text-[13px] font-semibold text-[#EEF0F4]" title={current.title}>
               {current.title}

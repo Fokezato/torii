@@ -28,7 +28,7 @@ pub async fn test_connection(
         .header("X-Emby-Token", api_key)
         .send()
         .await
-        .map_err(|e| format!("não deu pra conectar: {e}"))?;
+        .map_err(|e| tr!("não deu pra conectar: {e}", "couldn't connect: {e}"))?;
 
     if !resp.status().is_success() {
         return Err(format!("Jellyfin respondeu {}", resp.status()));

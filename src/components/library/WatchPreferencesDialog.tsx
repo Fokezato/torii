@@ -6,7 +6,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { LanguageTagPicker } from "@/components/anime/LanguageTagPicker";
-import { QUALITIES } from "@/lib/constants";
+import { qualityOptions } from "@/lib/constants";
+import { useTranslation } from "react-i18next";
 import { setWatchPreferences, type Watch } from "@/lib/watches";
 import { getAvailableLanguages } from "@/lib/nyaa";
 import { getSettings } from "@/lib/tauri";
@@ -19,6 +20,7 @@ interface WatchPreferencesDialogProps {
 }
 
 export function WatchPreferencesDialog({ watch, onOpenChange }: WatchPreferencesDialogProps) {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [quality, setQuality] = useState("any");
   const [audioLangs, setAudioLangs] = useState<string[]>([]);
@@ -89,10 +91,12 @@ export function WatchPreferencesDialog({ watch, onOpenChange }: WatchPreferences
         {watch && (
           <>
             <div className="flex min-w-0 items-center justify-between gap-3 border-b border-[#1E212A] px-[22px] py-[18px]">
-              <h2 className="min-w-0 truncate text-base font-bold">Preferências · {watch.title}</h2>
+              <h2 className="min-w-0 truncate text-base font-bold">
+                {t("detail.preferences")} · {watch.title}
+              </h2>
               <button
                 type="button"
-                aria-label="Fechar"
+                aria-label={t("common.close")}
                 onClick={() => onOpenChange(false)}
                 className="ml-3 flex size-[30px] shrink-0 items-center justify-center rounded-lg text-[#6C7180] transition-colors hover:bg-white/5 hover:text-foreground"
               >
@@ -102,7 +106,7 @@ export function WatchPreferencesDialog({ watch, onOpenChange }: WatchPreferences
 
             <div className="flex flex-col gap-[18px] p-[22px]">
               <div className="flex items-center justify-between gap-5">
-                <span className="text-[13px] font-semibold">Qualidade</span>
+                <span className="text-[13px] font-semibold">{t("detail.quality")}</span>
                 <Select value={quality} onValueChange={setQuality}>
                   <SelectTrigger
                     size="sm"
@@ -112,7 +116,7 @@ export function WatchPreferencesDialog({ watch, onOpenChange }: WatchPreferences
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {QUALITIES.map((q) => (
+                    {qualityOptions().map((q) => (
                       <SelectItem key={q.value} value={q.value}>
                         {q.label}
                       </SelectItem>
@@ -122,38 +126,38 @@ export function WatchPreferencesDialog({ watch, onOpenChange }: WatchPreferences
               </div>
 
               <div className="flex flex-col gap-2">
-                <span className="text-[13px] font-semibold">Idioma de áudio</span>
+                <span className="text-[13px] font-semibold">{t("addAnime.audioLanguage")}</span>
                 <LanguageTagPicker selected={audioLangs} onChange={setAudioLangs} available={availableLangs?.audio} />
               </div>
               <div className="flex flex-col gap-2">
-                <span className="text-[13px] font-semibold">Legenda</span>
+                <span className="text-[13px] font-semibold">{t("detail.subtitle")}</span>
                 <LanguageTagPicker selected={subLangs} onChange={setSubLangs} available={availableLangs?.subtitles} />
               </div>
 
               <div className="h-px bg-[#1E212A]" />
 
               <div className="flex items-center justify-between gap-5">
-                <span className="text-[13px] font-semibold">Apagar após (dias)</span>
+                <span className="text-[13px] font-semibold">{t("preferences.deleteAfterDays")}</span>
                 <input
                   type="number"
                   min={1}
                   value={deleteAfterDays}
                   onChange={(e) => setDeleteAfterDays(e.target.value)}
-                  placeholder="nunca"
-                  title="0 não é permitido — apagaria o episódio assim que ficasse pronto"
+                  placeholder={t("preferences.never")}
+                  title={t("preferences.deleteAfterDaysHint")}
                   className="w-20 rounded-lg border border-[#262A35] bg-[#1B1E27] px-3 py-2 text-right text-xs text-foreground outline-none focus:border-primary"
                 />
               </div>
 
               <div className="flex items-center justify-between gap-5">
-                <span className="text-[13px] font-semibold">Notificar quando pronto</span>
+                <span className="text-[13px] font-semibold">{t("preferences.notifyReady")}</span>
                 <Switch checked={notify} onCheckedChange={setNotify} />
               </div>
 
               <div className="h-px bg-[#1E212A]" />
-              <span className="text-[13px] font-semibold">Reduzir tamanho dos arquivos</span>
+              <span className="text-[13px] font-semibold">{t("reduceSize.title")}</span>
               <IrreversibleToggle
-                feature="strip_audio"
+                feature="stripAudio"
                 scope="anime"
                 checked={stripAudio}
                 forcedOn={globalStrip}
@@ -171,9 +175,11 @@ export function WatchPreferencesDialog({ watch, onOpenChange }: WatchPreferences
 
               <div className="flex flex-col gap-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-[13px] font-semibold">Quais episódios baixar</span>
+                  <span className="text-[13px] font-semibold">{t("addAnime.whichEpisodes")}</span>
                   <span className="text-[12px] font-semibold text-primary">
-                    {rangeIsFull ? "Todos" : `Ep ${episodeRange[0]} – ${episodeRange[1]}`}
+                    {rangeIsFull
+                      ? t("addAnime.allEpisodes")
+                      : t("addAnime.episodeRange", { from: episodeRange[0], to: episodeRange[1] })}
                   </span>
                 </div>
                 <Slider
@@ -185,8 +191,8 @@ export function WatchPreferencesDialog({ watch, onOpenChange }: WatchPreferences
                   className="py-1.5"
                 />
                 <div className="flex items-center justify-between text-[11px] text-[#6C7180]">
-                  <span>Ep 1</span>
-                  <span>Ep {totalEpisodes}</span>
+                  <span>{t("common.episodeShort", { number: 1 })}</span>
+                  <span>{t("common.episodeShort", { number: totalEpisodes })}</span>
                 </div>
               </div>
             </div>
@@ -197,7 +203,7 @@ export function WatchPreferencesDialog({ watch, onOpenChange }: WatchPreferences
                 onClick={() => onOpenChange(false)}
                 className="rounded-[10px] border border-[#33374A] px-[18px] py-2.5 text-[13px] font-semibold text-[#9BA0AE] transition-colors hover:text-foreground"
               >
-                Cancelar
+                {t("common.cancel")}
               </button>
               <button
                 type="button"
@@ -205,7 +211,7 @@ export function WatchPreferencesDialog({ watch, onOpenChange }: WatchPreferences
                 onClick={() => mutation.mutate()}
                 className="rounded-[10px] bg-primary px-5 py-2.5 text-[13px] font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
               >
-                {mutation.isPending ? "Salvando..." : "Salvar"}
+                {mutation.isPending ? t("common.saving") : t("common.save")}
               </button>
             </div>
           </>

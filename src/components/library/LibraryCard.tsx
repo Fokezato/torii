@@ -1,6 +1,7 @@
 import { Bookmark, Check, Loader2, MoreHorizontal, Play, Star } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import type { Watch } from "@/lib/watches";
-import { LIST_STATUS_LABEL } from "@/lib/constants";
+import { listStatusLabel } from "@/lib/constants";
 import { formatShortDate } from "@/lib/format";
 
 const BADGE_STYLE: Record<string, string> = {
@@ -36,7 +37,8 @@ export function LibraryCard({
   /** Quantas temporadas esse card representa — mostra um indicador quando > 1. */
   seasonCount?: number;
 }) {
-  const label = LIST_STATUS_LABEL[watch.list_status] ?? watch.list_status;
+  const { t } = useTranslation();
+  const label = listStatusLabel(watch.list_status);
   const Icon = BADGE_ICON[watch.list_status];
   const height = Math.round(width * (124 / 220));
   const displayTitle = title ?? watch.title;
@@ -47,7 +49,7 @@ export function LibraryCard({
       <button
         type="button"
         onClick={onPlay}
-        aria-label={`Assistir ${displayTitle}`}
+        aria-label={t("library.watch", { title: displayTitle })}
         style={{ width, height }}
         className="relative block overflow-hidden rounded-xl bg-secondary shadow-[0_4px_16px_rgba(0,0,0,0.4)] ring-1 ring-white/5 transition-shadow duration-200 group-hover:shadow-[0_12px_32px_rgba(0,0,0,0.55)] group-hover:ring-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
       >
@@ -72,12 +74,12 @@ export function LibraryCard({
         </span>
         {!watch.active && watch.list_status === "watching" && (
           <span className="absolute top-2 right-2 rounded-[5px] bg-black/55 px-1.5 py-0.5 text-[9px] font-bold text-white">
-            PAUSADO
+            {t("library.pausedBadge")}
           </span>
         )}
         {seasonCount > 1 && (
           <span className="absolute bottom-2 left-2 rounded-[5px] bg-black/65 px-1.5 py-0.5 text-[9px] font-bold text-white">
-            {seasonCount} temporadas
+            {t("library.seasonCount", { count: seasonCount })}
           </span>
         )}
 
@@ -97,8 +99,8 @@ export function LibraryCard({
       </button>
       <button
         type="button"
-        aria-label={`Abrir página de ${displayTitle}`}
-        title="Abrir página do anime"
+        aria-label={t("library.openPageOf", { title: displayTitle })}
+        title={t("library.openPage")}
         onClick={onOpenDetails}
         className="absolute right-2 bottom-2 flex size-7 items-center justify-center rounded-full bg-black/65 text-white opacity-0 transition-all duration-200 group-hover:opacity-100 hover:bg-black/85 focus-visible:opacity-100"
       >
@@ -115,13 +117,13 @@ export function LibraryCard({
               {watch.rating}
             </span>
           ) : (
-            <span className="text-xs text-[#4E5361]">Sem nota</span>
+            <span className="text-xs text-[#4E5361]">{t("library.noRating")}</span>
           )}
           <span className="text-xs text-[#6C7180]">{formatShortDate(watch.updated_at)}</span>
         </div>
         <div className="h-[6px] w-full overflow-hidden rounded-full bg-[#262A35]" />
         <p className="text-[10.5px] text-[#6C7180]">
-          {watch.episodes ? `${watch.episodes} episódios` : "Episódios: ?"}
+          {watch.episodes ? t("common.episodeCount", { count: watch.episodes }) : t("library.episodesUnknown")}
         </p>
       </div>
     </article>

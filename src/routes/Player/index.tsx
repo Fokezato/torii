@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { playerOpen, playerStop } from "@/lib/player";
 import { listWatchEpisodes } from "@/lib/episodes";
 import { listWatches } from "@/lib/watches";
@@ -16,6 +17,7 @@ const MIN_RESUME_MS = 5_000;
 /// cima (ver `routes/PlayerOverlay`). Abre o episódio `:episode` do anime
 /// `:watchId`, continuando de onde parou se não tinha terminado.
 export default function Player() {
+  const { t } = useTranslation();
   const { watchId, episode } = useParams<{ watchId: string; episode: string }>();
   const navigate = useNavigate();
   const slotRef = useRef<HTMLDivElement>(null);
@@ -32,7 +34,7 @@ export default function Player() {
       const ep = episodes.find((e) => episodeNumberOf(e) === number);
       const source = ep && isPlayable(ep) ? (ep.item_path ?? ep.save_path) : null;
       if (!watch || !ep || !source) {
-        setError("Esse episódio não está disponível pra assistir.");
+        setError(t("player.unavailable"));
         return;
       }
       if (cancelled) return;
@@ -65,7 +67,7 @@ export default function Player() {
             className="flex items-center gap-2 rounded-[10px] border border-white/20 px-4 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-white/10"
           >
             <ArrowLeft className="size-4" />
-            Voltar
+            {t("common.back")}
           </button>
         </div>
       )}

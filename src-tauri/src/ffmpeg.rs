@@ -102,7 +102,7 @@ async fn download_and_extract(app: &AppHandle, http: &reqwest::Client) -> Result
         .send()
         .await
         .and_then(|r| r.error_for_status())
-        .map_err(|e| format!("não conseguiu baixar checksums do ffmpeg: {e}"))?
+        .map_err(|e| tr!("não conseguiu baixar checksums do ffmpeg: {e}", "couldn't download the ffmpeg checksums: {e}"))?
         .text()
         .await
         .map_err(|e| e.to_string())?;
@@ -112,7 +112,7 @@ async fn download_and_extract(app: &AppHandle, http: &reqwest::Client) -> Result
             let (hash, name) = line.split_once(char::is_whitespace)?;
             (name.trim().trim_start_matches('*') == ZIP_NAME).then(|| hash.trim().to_lowercase())
         })
-        .ok_or_else(|| format!("{ZIP_NAME} não aparece no checksums.sha256 do release"))?;
+        .ok_or_else(|| tr!("{ZIP_NAME} não aparece no checksums.sha256 do release", "{ZIP_NAME} isn't listed in the release checksums.sha256"))?;
 
     let zip_path = dir.join("download.zip.part");
     let mut resp = http
@@ -125,7 +125,7 @@ async fn download_and_extract(app: &AppHandle, http: &reqwest::Client) -> Result
     let mut file = tokio::fs::File::create(&zip_path).await.map_err(|e| e.to_string())?;
     let mut hasher = Sha256::new();
     let mut done: u64 = 0;
-    while let Some(chunk) = resp.chunk().await.map_err(|e| format!("download do ffmpeg interrompido: {e}"))? {
+    while let Some(chunk) = resp.chunk().await.map_err(|e| tr!("download do ffmpeg interrompido: {e}", "ffmpeg download interrupted: {e}"))? {
         hasher.update(&chunk);
         file.write_all(&chunk).await.map_err(|e| e.to_string())?;
         done += chunk.len() as u64;
@@ -139,7 +139,7 @@ async fn download_and_extract(app: &AppHandle, http: &reqwest::Client) -> Result
     let actual = hex::encode(hasher.finalize());
     if actual != expected {
         let _ = tokio::fs::remove_file(&zip_path).await;
-        return Err("download do ffmpeg corrompido (SHA-256 não bate) — tente de novo".to_string());
+        return Err(tr!("download do ffmpeg corrompido (SHA-256 não bate) — tente de novo", "ffmpeg download corrupted (SHA-256 mismatch) — try again"));
     }
 
     let extract_dir = dir.clone();
@@ -150,7 +150,7 @@ async fn download_and_extract(app: &AppHandle, http: &reqwest::Client) -> Result
     let _ = tokio::fs::remove_file(&zip_path).await;
     tokio::fs::write(dir.join(VERSION_FILE), ZIP_NAME).await.map_err(|e| e.to_string())?;
 
-    installed(app).ok_or_else(|| "ffmpeg.exe/ffprobe.exe não vieram no pacote".to_string())
+    installed(app).ok_or_else(|| tr!("ffmpeg.exe/ffprobe.exe não vieram no pacote", "ffmpeg.exe/ffprobe.exe missing from the package"))
 }
 
 /// Extrai só `*/bin/*` (ffmpeg, ffprobe e DLLs) — o resto do pacote

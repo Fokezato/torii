@@ -44,9 +44,20 @@ import {
   type ListStatus,
   type Watch,
 } from "@/lib/watches";
-import { LANGUAGES, LIST_STATUS_LABEL, LIST_STATUS_OPTIONS, QUALITIES, SEASON_LABEL, STATUS_LABEL } from "@/lib/constants";
+import {
+  episodeStatusLabel,
+  languageLabel,
+  listStatusLabel,
+  listStatusOptions,
+  qualityLabel as qualityName,
+  seasonLabel,
+  statusLabel,
+} from "@/lib/constants";
+import { useTranslation } from "react-i18next";
+import { currentLocale } from "@/i18n";
 
 export default function LibraryDetail() {
+  const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [prefsOpen, setPrefsOpen] = useState(false);
@@ -133,19 +144,19 @@ export default function LibraryDetail() {
   });
 
   if (watchesLoading) {
-    return <p className="text-sm text-muted-foreground">Carregando...</p>;
+    return <p className="text-sm text-muted-foreground">{t("common.loading")}</p>;
   }
 
   if (!watch) {
     return (
       <div className="space-y-4">
-        <p className="text-sm text-muted-foreground">Anime não encontrado na sua biblioteca.</p>
+        <p className="text-sm text-muted-foreground">{t("detail.notFound")}</p>
         <button
           type="button"
           onClick={() => navigate("/library")}
           className="text-sm font-semibold text-primary"
         >
-          Voltar pra biblioteca
+          {t("detail.backToLibrary")}
         </button>
       </div>
     );
@@ -173,11 +184,11 @@ export default function LibraryDetail() {
 
   const metaLine = [
     anime?.season_year && anime.season
-      ? `${anime.season_year} · ${SEASON_LABEL[anime.season] ?? anime.season}`
+      ? `${anime.season_year} · ${seasonLabel(anime.season)}`
       : null,
     anime?.studio,
-    anime?.duration ? `${anime.duration} min/ep` : null,
-    episodes ? `${episodes} episódios` : null,
+    anime?.duration ? t("common.minPerEpisode", { count: anime.duration }) : null,
+    episodes ? t("common.episodeCount", { count: episodes }) : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -190,7 +201,7 @@ export default function LibraryDetail() {
         className="flex w-fit items-center gap-1.5 text-xs font-semibold text-[#9BA0AE] transition-colors hover:text-foreground"
       >
         <ChevronLeft className="size-3.5" />
-        Biblioteca
+        {t("nav.library")}
       </button>
 
       <div className="relative h-[210px] shrink-0 overflow-hidden rounded-[18px] bg-secondary">
@@ -198,7 +209,7 @@ export default function LibraryDetail() {
         <div className="absolute inset-0 bg-gradient-to-t from-background via-background/20 to-transparent" />
         {watch.status && (
           <span className="absolute bottom-4 left-5 rounded-md bg-accent2 px-2.5 py-1 text-[11px] font-bold tracking-wide text-background uppercase">
-            {STATUS_LABEL[watch.status] ?? watch.status}
+            {statusLabel(watch.status)}
             {episodes ? ` · ${episodes} eps` : ""}
           </span>
         )}
@@ -214,10 +225,10 @@ export default function LibraryDetail() {
                 style={{ backgroundColor: "var(--primary)", color: "var(--primary-foreground)" }}
                 className="rounded-md border-0 px-2 text-[11px] font-bold tracking-wide uppercase [&_svg]:text-primary-foreground"
               >
-                <SelectValue>{LIST_STATUS_LABEL[watch.list_status] ?? watch.list_status}</SelectValue>
+                <SelectValue>{listStatusLabel(watch.list_status)}</SelectValue>
               </SelectTrigger>
               <SelectContent>
-                {LIST_STATUS_OPTIONS.map((o) => (
+                {listStatusOptions().map((o) => (
                   <SelectItem key={o.value} value={o.value}>
                     {o.label}
                   </SelectItem>
@@ -237,7 +248,7 @@ export default function LibraryDetail() {
               className="flex items-center gap-2 rounded-[10px] bg-primary px-4.5 py-2.5 text-[13px] font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
             >
               <Play className="size-3.5" fill="currentColor" />
-              Reproduzir
+              {t("detail.play")}
             </button>
             <button
               type="button"
@@ -245,7 +256,7 @@ export default function LibraryDetail() {
               className="flex items-center gap-2 rounded-[10px] border border-[#33374A] px-3.5 py-2.5 text-[13px] font-semibold text-foreground transition-colors hover:bg-white/5"
             >
               <Settings2 className="size-3.5" />
-              Preferências
+              {t("detail.preferences")}
             </button>
             <button
               type="button"
@@ -253,7 +264,7 @@ export default function LibraryDetail() {
               className="flex items-center gap-2 rounded-[10px] border border-[#3A2A30] px-3.5 py-2.5 text-[13px] font-semibold text-[#B5576B] transition-colors hover:bg-[#B5576B]/10"
             >
               <Trash2 className="size-3.5" />
-              Remover
+              {t("detail.remove")}
             </button>
           </div>
         </div>
@@ -262,7 +273,7 @@ export default function LibraryDetail() {
 
         <div className="flex flex-wrap items-center gap-x-7 gap-y-3">
           <div className="flex items-center gap-1.5">
-            <span className="mr-1 text-xs text-[#B5B9C4]">Sua nota</span>
+            <span className="mr-1 text-xs text-[#B5B9C4]">{t("detail.yourRating")}</span>
             {[1, 2, 3, 4, 5].map((n) => (
               <button key={n} type="button" onClick={() => patchRating.mutate(n)}>
                 <Star
@@ -278,14 +289,14 @@ export default function LibraryDetail() {
 
           {anime?.score != null && (
             <div className="flex items-center gap-1.5 text-xs text-[#B5B9C4]">
-              Avaliação do público
+              {t("detail.audienceScore")}
               <Star className="size-[13px] fill-accent2 text-accent2" />
               <span className="text-sm font-bold text-foreground">{(anime.score / 10).toFixed(1)}</span>
             </div>
           )}
 
           <label className="flex items-center gap-2.5 text-xs text-[#B5B9C4]">
-            Checar novos episódios
+            {t("detail.checkNewEpisodes")}
             <Switch checked={watch.active} onCheckedChange={(v) => patchActive.mutate(v)} />
           </label>
         </div>
@@ -310,7 +321,7 @@ export default function LibraryDetail() {
 
       <div className="flex flex-col gap-3.5">
         <div className="flex flex-wrap items-center gap-2.5">
-          <h2 className="text-lg font-bold">Episódios</h2>
+          <h2 className="text-lg font-bold">{t("detail.episodes")}</h2>
           <div className="flex flex-wrap items-center gap-2">
             {seasons.map((s) => (
               <button
@@ -335,12 +346,12 @@ export default function LibraryDetail() {
                     className="flex items-center gap-1 rounded-full border border-dashed border-[#33374A] px-3 py-1 text-[11px] font-semibold text-[#B5B9C4] transition-colors hover:border-primary hover:text-foreground"
                   >
                     <Plus className="size-3" />
-                    Outra temporada
+                    {t("detail.anotherSeason")}
                   </button>
                 </PopoverTrigger>
                 <PopoverContent align="start" className="w-72 p-1.5">
                   <span className="block px-2.5 pt-1 pb-1.5 text-[10px] font-bold tracking-wide text-[#6C7180] uppercase">
-                    Baixar outra temporada
+                    {t("detail.downloadAnotherSeason")}
                   </span>
                   {missingSeasons.map((f) => (
                     <button
@@ -363,14 +374,14 @@ export default function LibraryDetail() {
             )}
           </div>
           <span className="text-xs text-[#6C7180]">
-            {downloadedCount} baixado{downloadedCount === 1 ? "" : "s"}
-            {episodes ? ` de ${episodes}` : ""}
+            {episodes
+              ? t("detail.downloadedOf", { count: downloadedCount, total: episodes })
+              : t("detail.downloaded", { count: downloadedCount })}
           </span>
         </div>
         {episodeList.filter((e) => e.status !== "deleted").length === 0 ? (
           <div className="rounded-xl border border-dashed border-[#23262F] p-6 text-center text-xs text-[#6C7180]">
-            Nenhum episódio encontrado ainda. Assim que o motor achar um torrent compatível, o download
-            começa automaticamente e o episódio aparece aqui.
+            {t("detail.noEpisodes")}
           </div>
         ) : (
           <div className="flex flex-col gap-2">
@@ -395,15 +406,16 @@ export default function LibraryDetail() {
   );
 }
 
-const EPISODE_STATUS: Record<string, { label: string; bg: string; fg: string }> = {
-  pending: { label: "Procurando", bg: "transparent", fg: "#6C7180" },
-  found: { label: "Iniciando", bg: "transparent", fg: "#B5B9C4" },
-  downloading: { label: "Baixando", bg: "#FF6A45", fg: "#0B0C10" },
-  available: { label: "Pronto", bg: "#6FC48A", fg: "#0B0C10" },
-  error: { label: "Erro", bg: "#E5484D", fg: "#0B0C10" },
+const EPISODE_STATUS_STYLE: Record<string, { bg: string; fg: string }> = {
+  pending: { bg: "transparent", fg: "#6C7180" },
+  found: { bg: "transparent", fg: "#B5B9C4" },
+  downloading: { bg: "#FF6A45", fg: "#0B0C10" },
+  available: { bg: "#6FC48A", fg: "#0B0C10" },
+  error: { bg: "#E5484D", fg: "#0B0C10" },
 };
 
 function EpisodeItem({ episode, watch, airingAt }: { episode: Episode; watch: Watch; airingAt?: number }) {
+  const { t } = useTranslation();
   // Fora do intervalo escolhido ("Quais episódios baixar"): o motor não
   // busca, mas o episódio continua na lista em vez de sumir.
   const n = episode.episode_number;
@@ -425,17 +437,21 @@ function EpisodeItem({ episode, watch, airingAt }: { episode: Episode; watch: Wa
   // dia exato — só deixar claro que é espera de idioma, não busca quebrada.
   const wantedLangs = [...(watch.audio_lang?.split(",") ?? []), ...(watch.sub_lang?.split(",") ?? [])]
     .filter(Boolean)
-    .map(langLabel);
+    .map(languageLabel);
   const waitingForLocalizedRelease =
     episode.status === "pending" && !outOfRange && !notYetAired && wantedLangs.length > 0;
 
+  const muted = { bg: "transparent", fg: "#6C7180" };
   const s = outOfRange
-    ? { label: "Não baixado", bg: "transparent", fg: "#6C7180" }
+    ? { label: t("episodeStatus.notDownloaded"), ...muted }
     : notYetAired
-    ? { label: "Anunciado", bg: "transparent", fg: "#6C7180" }
+    ? { label: t("episodeStatus.announced"), ...muted }
     : waitingForLocalizedRelease
-      ? { label: "Aguardando idioma", bg: "transparent", fg: "#6C7180" }
-      : (EPISODE_STATUS[episode.status] ?? { label: episode.status, bg: "transparent", fg: "#B5B9C4" });
+      ? { label: t("episodeStatus.waitingLanguage"), ...muted }
+      : {
+          label: episodeStatusLabel(episode.status),
+          ...(EPISODE_STATUS_STYLE[episode.status] ?? { bg: "transparent", fg: "#B5B9C4" }),
+        };
   return (
     <div className="flex items-center gap-3 rounded-[10px] border border-[#1E212A] bg-[#15171D] px-4 py-3">
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -447,12 +463,12 @@ function EpisodeItem({ episode, watch, airingAt }: { episode: Episode; watch: Wa
         )}
         {notYetAired && (
           <span className="truncate text-[11px] text-[#6C7180]">
-            Disponível a partir de {new Date(airingAt! * 1000).toLocaleDateString("pt-BR")}
+            {t("detail.availableFrom", { date: new Date(airingAt! * 1000).toLocaleDateString(currentLocale()) })}
           </span>
         )}
         {waitingForLocalizedRelease && (
-          <span className="truncate text-[11px] text-[#6C7180]" title="A AniList só sabe a data original (japonês) — não dá pra saber o dia exato do lançamento localizado.">
-            Já foi ao ar, sem versão em {wantedLangs.join(", ")} ainda
+          <span className="truncate text-[11px] text-[#6C7180]" title={t("detail.localizedHint")}>
+            {t("detail.waitingLocalized", { languages: wantedLangs.join(", ") })}
           </span>
         )}
       </div>
@@ -486,6 +502,7 @@ function EpisodeActionsMenu({
   /** Fora do intervalo escolhido — "Forçar verificação" vira "Baixar agora". */
   outOfRange: boolean;
 }) {
+  const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
   const [sourceOpen, setSourceOpen] = useState(false);
   const queryClient = useQueryClient();
@@ -495,7 +512,11 @@ function EpisodeActionsMenu({
     onSuccess: (found) => {
       queryClient.invalidateQueries({ queryKey: ["watch-episodes"] });
       if (!found) {
-        notify("Forçar verificação", `Nada encontrado pra ${parseEpisodeLabel(episode.name, episode.episode_number)} ainda.`, "info");
+        notify(
+          t("detail.forceCheck"),
+          t("detail.forceCheckNothing", { episode: parseEpisodeLabel(episode.name, episode.episode_number) }),
+          "info",
+        );
       }
     },
   });
@@ -506,8 +527,8 @@ function EpisodeActionsMenu({
         <PopoverTrigger asChild>
           <button
             type="button"
-            aria-label="Mais opções"
-            title="Mais opções"
+            aria-label={t("detail.moreOptions")}
+            title={t("detail.moreOptions")}
             className="flex size-7 shrink-0 items-center justify-center rounded-[8px] border border-[#262A35] text-[#B5B9C4] hover:bg-secondary"
           >
             <MoreVertical className="size-3.5" />
@@ -523,7 +544,7 @@ function EpisodeActionsMenu({
             className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-white/5"
           >
             <ListVideo className="size-3.5 text-[#6C7180]" />
-            Fonte
+            {t("detail.source")}
           </button>
           <button
             type="button"
@@ -535,7 +556,7 @@ function EpisodeActionsMenu({
             className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-white/5 disabled:opacity-40"
           >
             <RefreshCw className={`size-3.5 text-[#6C7180] ${forceCheck.isPending ? "animate-spin" : ""}`} />
-            {outOfRange ? "Baixar agora" : "Forçar verificação"}
+            {outOfRange ? t("detail.downloadNow") : t("detail.forceCheck")}
           </button>
         </PopoverContent>
       </Popover>
@@ -549,10 +570,6 @@ function EpisodeActionsMenu({
 /// tamanho, link pro nyaa — e botão pra trocar qual tá ativa. Fontes só
 /// existem em `episode_sources` a partir dessa feature; episódio antigo
 /// (baixado antes dela existir) mostra a lista vazia, sem quebrar nada.
-function langLabel(value: string) {
-  return LANGUAGES.find((l) => l.value === value)?.label ?? value;
-}
-
 function SourceDialog({
   episode,
   watch,
@@ -564,13 +581,14 @@ function SourceDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
 
-  const qualityLabel = QUALITIES.find((q) => q.value === watch.quality)?.label ?? watch.quality;
+  const qualityLabel = qualityName(watch.quality);
   const audioLabel = watch.audio_lang
-    ? watch.audio_lang.split(",").map(langLabel).join(", ")
-    : "Qualquer";
-  const subLabel = watch.sub_lang ? watch.sub_lang.split(",").map(langLabel).join(", ") : "Qualquer";
+    ? watch.audio_lang.split(",").map(languageLabel).join(", ")
+    : t("common.any");
+  const subLabel = watch.sub_lang ? watch.sub_lang.split(",").map(languageLabel).join(", ") : t("common.any");
 
   const { data: sources = [], isLoading } = useQuery({
     queryKey: ["episode-sources", episode.id],
@@ -595,28 +613,26 @@ function SourceDialog({
       >
         <div className="flex flex-col gap-2 border-b border-[#1E212A] px-[22px] py-[18px]">
           <h2 className="min-w-0 truncate text-base font-bold">
-            Fonte · {parseEpisodeLabel(episode.name)}
+            {t("detail.source")} · {parseEpisodeLabel(episode.name)}
           </h2>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-[#6C7180]">
             <span>
-              Qualidade: <span className="text-[#B5B9C4]">{qualityLabel}</span>
+              {t("detail.quality")}: <span className="text-[#B5B9C4]">{qualityLabel}</span>
             </span>
             <span>
-              Áudio: <span className="text-[#B5B9C4]">{audioLabel}</span>
+              {t("detail.audio")}: <span className="text-[#B5B9C4]">{audioLabel}</span>
             </span>
             <span>
-              Legenda: <span className="text-[#B5B9C4]">{subLabel}</span>
+              {t("detail.subtitle")}: <span className="text-[#B5B9C4]">{subLabel}</span>
             </span>
           </div>
         </div>
 
         <div className="flex max-h-[60vh] flex-col gap-2 overflow-y-auto p-[18px]">
           {isLoading ? (
-            <p className="px-1 py-2 text-xs text-[#6C7180]">Carregando...</p>
+            <p className="px-1 py-2 text-xs text-[#6C7180]">{t("common.loading")}</p>
           ) : sources.length === 0 ? (
-            <p className="px-1 py-2 text-xs text-[#6C7180]">
-              Sem informação de fonte pra esse episódio (baixado antes dessa função existir).
-            </p>
+            <p className="px-1 py-2 text-xs text-[#6C7180]">{t("detail.noSourceInfo")}</p>
           ) : (
             sources.map((s) => (
               <div
@@ -630,7 +646,7 @@ function SourceDialog({
                   {!!s.is_active && (
                     <span className="flex shrink-0 items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-bold text-primary">
                       <Check className="size-3" />
-                      Ativa
+                      {t("detail.activeSource")}
                     </span>
                   )}
                 </div>
@@ -648,7 +664,7 @@ function SourceDialog({
                     className="flex items-center gap-1.5 rounded-[8px] border border-[#262A35] px-2.5 py-1.5 text-[11px] font-semibold text-[#B5B9C4] transition-colors hover:text-foreground"
                   >
                     <ExternalLink className="size-3" />
-                    Ver no Nyaa
+                    {t("detail.viewOnNyaa")}
                   </button>
                   {!s.is_active && (
                     <button
@@ -657,7 +673,7 @@ function SourceDialog({
                       onClick={() => switchSource.mutate(s.source_item_id)}
                       className="ml-auto rounded-[8px] bg-primary px-2.5 py-1.5 text-[11px] font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
                     >
-                      {switchSource.isPending ? "Trocando..." : "Usar essa fonte"}
+                      {switchSource.isPending ? t("detail.switching") : t("detail.useSource")}
                     </button>
                   )}
                 </div>
@@ -672,7 +688,7 @@ function SourceDialog({
             onClick={() => onOpenChange(false)}
             className="rounded-[10px] border border-[#33374A] px-[18px] py-2.5 text-[13px] font-semibold text-[#9BA0AE] transition-colors hover:text-foreground"
           >
-            Fechar
+            {t("common.close")}
           </button>
         </div>
       </DialogContent>

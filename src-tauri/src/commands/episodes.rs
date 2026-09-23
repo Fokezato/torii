@@ -58,7 +58,7 @@ pub async fn force_check_episode(
         .episode_number
         .or_else(|| episode.name.as_deref().and_then(crate::sources::nyaa::extract_episode_number).map(i64::from))
     else {
-        return Err(AppError::Fetch("episódio sem número identificável".to_string()));
+        return Err(AppError::Fetch(tr!("episódio sem número identificável", "episode has no recognizable number")));
     };
 
     let audio_langs = engine::split_langs(&watch.audio_lang);
@@ -75,7 +75,7 @@ pub async fn force_check_episode(
     .map_err(AppError::Fetch)?;
 
     let Some(episode_match) = best else {
-        state.activity.info(format!("Forçar verificação: nada achado pra \"{}\" ep {episode_number}", watch.title));
+        state.activity.info(tr!("Forçar verificação: nada achado pra \"{}\" ep {episode_number}", "Check now: nothing found for \"{}\" ep {episode_number}", watch.title));
         return Ok(false);
     };
 

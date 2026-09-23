@@ -40,7 +40,7 @@ const DEFAULTS: &[(&str, &str)] = &[
     // anime só decide sozinho quando isso está desligado).
     ("downscale_resolution", "original"),
     ("close_action", "tray"),
-    ("app_language", "pt-BR"),
+    ("app_language", "auto"),
     // Notificações: chave mestra desliga tudo de uma vez; cada tipo tem a
     // própria chave pra desligar individualmente. Ver src/lib/notify.ts.
     ("notify_master", "1"),

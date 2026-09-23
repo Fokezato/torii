@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { Plus, Star } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Carousel, CarouselContent, CarouselItem, type CarouselApi } from "@/components/ui/carousel";
 import type { AnimeSummary } from "@/lib/anilist";
-import { STATUS_LABEL } from "@/lib/constants";
+import { statusLabel } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 
 interface HeroCarouselProps {
@@ -11,6 +12,7 @@ interface HeroCarouselProps {
 }
 
 export function HeroCarousel({ items, onAdd }: HeroCarouselProps) {
+  const { t } = useTranslation();
   const [api, setApi] = useState<CarouselApi>();
   const [current, setCurrent] = useState(0);
 
@@ -71,7 +73,7 @@ export function HeroCarousel({ items, onAdd }: HeroCarouselProps) {
               <div className="relative flex h-full max-w-xl flex-col justify-end gap-3.5 px-9 pb-8">
                 {anime.status && (
                   <span className="self-start rounded-md bg-accent2 px-2.5 py-1 text-[11px] font-bold tracking-wide text-background uppercase">
-                    {STATUS_LABEL[anime.status] ?? anime.status}
+                    {statusLabel(anime.status)}
                     {anime.episodes ? ` · ${anime.episodes} eps` : ""}
                   </span>
                 )}
@@ -106,7 +108,7 @@ export function HeroCarousel({ items, onAdd }: HeroCarouselProps) {
                     className="flex items-center gap-2 rounded-[10px] bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
                   >
                     <Plus className="size-4" strokeWidth={2.2} />
-                    Adicionar à biblioteca
+                    {t("common.addToLibrary")}
                   </button>
                 </div>
               </div>

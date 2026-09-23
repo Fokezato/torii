@@ -1,5 +1,9 @@
+import { useTranslation } from "react-i18next";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+
+/// Valor do filtro "todos os gêneros" (o rótulo vem da tradução).
+export const ALL_GENRES = "__all__";
 
 interface GenreFilterBarProps {
   genres: string[];
@@ -8,7 +12,8 @@ interface GenreFilterBarProps {
 }
 
 export function GenreFilterBar({ genres, value, onChange }: GenreFilterBarProps) {
-  const options = ["Todos", ...genres];
+  const { t } = useTranslation();
+  const options = [ALL_GENRES, ...genres];
 
   return (
     <ScrollArea className="w-full whitespace-nowrap">
@@ -25,7 +30,7 @@ export function GenreFilterBar({ genres, value, onChange }: GenreFilterBarProps)
                 : "bg-secondary text-secondary-foreground hover:bg-secondary/70",
             )}
           >
-            {g}
+            {g === ALL_GENRES ? t("home.allGenres") : g}
           </button>
         ))}
       </div>

@@ -1,4 +1,5 @@
 import { seasonTabLabel } from "@/lib/anilist";
+import { t } from "@/i18n";
 
 const SXXEYY = /S(\d{1,2})E(\d{1,3})/i;
 const VIDEO_EXTENSIONS = /\.(mkv|mp4|avi|webm|mov|m4v|wmv|flv|ts)$/i;
@@ -15,11 +16,11 @@ export function stripFileExtension(filename: string): string {
  * `episodeNumber` é o fallback pra placeholder ainda sem release associado
  * (nome cru é null até o motor achar um torrent — ver `episodes.episode_number`). */
 export function parseEpisodeLabel(rawName: string | null, episodeNumber?: number | null): string {
-  if (!rawName) return episodeNumber != null ? `Episódio ${episodeNumber}` : "Episódio";
+  if (!rawName) return episodeNumber != null ? t("labels.episode", { number: episodeNumber }) : t("labels.episodeWord");
   const clean = stripFileExtension(rawName);
   const match = clean.match(SXXEYY);
   if (!match) return clean;
-  return `Episódio ${parseInt(match[2], 10)}`;
+  return t("labels.episode", { number: parseInt(match[2], 10) });
 }
 
 /** Deriva "nome do anime" + "Episódio N - Título" a partir de um nome de
@@ -50,7 +51,9 @@ export function parseFilenameTitleAndEpisode(rawFilename: string): { title: stri
     .trim();
   return {
     title: title || clean.trim(),
-    episodeLabel: rest ? `Episódio ${episodeNumber} - ${rest}` : `Episódio ${episodeNumber}`,
+    episodeLabel: rest
+      ? t("labels.episodeWithTitle", { number: episodeNumber, title: rest })
+      : t("labels.episode", { number: episodeNumber }),
   };
 }
 
@@ -105,6 +108,6 @@ export function formatPlayerTitle(
   const season = parseSeasonFromTitle(animeTitle);
   return {
     title: stripSeasonSuffix(animeTitle),
-    episodeLabel: season != null ? `Temporada ${season} - ${episodeLabel}` : episodeLabel,
+    episodeLabel: season != null ? `${t("labels.season", { number: season })} - ${episodeLabel}` : episodeLabel,
   };
 }

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { listWatches, seriesKeyOf, seriesTitleOf, type Watch } from "@/lib/watches";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -40,9 +41,9 @@ function groupBySeries(watches: Watch[]): WatchGroup[] {
 }
 
 const CARD_SIZES = [
-  { id: "sm", label: "Pequeno", width: 290 },
-  { id: "md", label: "Médio", width: 360 },
-  { id: "lg", label: "Grande", width: 430 },
+  { id: "sm", labelKey: "library.sizeSmall", width: 290 },
+  { id: "md", labelKey: "library.sizeMedium", width: 360 },
+  { id: "lg", labelKey: "library.sizeLarge", width: 430 },
 ] as const;
 type CardSizeId = (typeof CARD_SIZES)[number]["id"];
 const CARD_SIZE_STORAGE_KEY = "torii:library-card-size";
@@ -69,22 +70,23 @@ function useCardSize() {
 }
 
 const FILTERS = [
-  { id: "all", label: "Todos" },
-  { id: "watching", label: "Assistindo" },
-  { id: "downloaded", label: "Baixados" },
-  { id: "completed", label: "Concluído" },
-  { id: "planning", label: "Quero assistir" },
+  { id: "all", labelKey: "library.filterAll" },
+  { id: "watching", labelKey: "listStatus.watching" },
+  { id: "downloaded", labelKey: "library.filterDownloaded" },
+  { id: "completed", labelKey: "listStatus.completed" },
+  { id: "planning", labelKey: "listStatus.planning" },
 ] as const;
 type FilterId = (typeof FILTERS)[number]["id"];
 
 const SORTS = [
-  { id: "updated", label: "Atualizado recentemente" },
-  { id: "name", label: "Nome A-Z" },
-  { id: "rating", label: "Nota" },
+  { id: "updated", labelKey: "library.sortUpdated" },
+  { id: "name", labelKey: "library.sortName" },
+  { id: "rating", labelKey: "library.sortRating" },
 ] as const;
 type SortId = (typeof SORTS)[number]["id"];
 
 export default function Library() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { data, isLoading } = useQuery({ queryKey: ["watches"], queryFn: listWatches });
   const [filter, setFilter] = useState<FilterId>("all");
@@ -139,21 +141,21 @@ export default function Library() {
     <div className="flex flex-col gap-[22px]">
       <div className="flex items-baseline justify-between">
         <div className="flex items-baseline gap-3">
-          <h1 className="text-[26px] font-bold">Minha biblioteca</h1>
-          <span className="text-[13px] text-[#6C7180]">{groups.length} títulos salvos</span>
+          <h1 className="text-[26px] font-bold">{t("library.title")}</h1>
+          <span className="text-[13px] text-[#6C7180]">{t("library.savedCount", { count: groups.length })}</span>
         </div>
         <div className="flex items-center gap-2.5">
           <div
             role="group"
-            aria-label="Tamanho das miniaturas"
+            aria-label={t("library.cardSize")}
             className="flex items-center gap-0.5 rounded-lg border border-[#21242C] bg-[#15171D] p-0.5"
           >
             {CARD_SIZES.map((s, i) => (
               <button
                 key={s.id}
                 type="button"
-                title={s.label}
-                aria-label={s.label}
+                title={t(s.labelKey)}
+                aria-label={t(s.labelKey)}
                 aria-pressed={cardSize === s.id}
                 onClick={() => setCardSize(s.id)}
                 className={`flex size-7 items-center justify-center rounded-[6px] transition-colors ${
@@ -179,7 +181,7 @@ export default function Library() {
             <SelectContent>
               {SORTS.map((s) => (
                 <SelectItem key={s.id} value={s.id}>
-                  {s.label}
+                  {t(s.labelKey)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -187,7 +189,7 @@ export default function Library() {
         </div>
       </div>
 
-      <nav aria-label="Filtrar biblioteca" className="flex items-center gap-2">
+      <nav aria-label={t("library.filter")} className="flex items-center gap-2">
         {FILTERS.map((f) => (
           <button
             key={f.id}
@@ -200,7 +202,7 @@ export default function Library() {
                 : "border border-[#23262F] text-[#B5B9C4] hover:text-foreground"
             }`}
           >
-            {f.label} · {counts[f.id] ?? 0}
+            {t(f.labelKey)} · {counts[f.id] ?? 0}
           </button>
         ))}
       </nav>
@@ -219,12 +221,12 @@ export default function Library() {
 
       {!isLoading && (data?.length ?? 0) === 0 && (
         <p className="text-sm text-muted-foreground">
-          Sua biblioteca está vazia. Adicione animes pela aba Início.
+          {t("library.empty")}
         </p>
       )}
 
       {!isLoading && (data?.length ?? 0) > 0 && filtered.length === 0 && (
-        <p className="text-sm text-muted-foreground">Nada encontrado com esse filtro.</p>
+        <p className="text-sm text-muted-foreground">{t("library.noMatch")}</p>
       )}
 
       {!isLoading && filtered.length > 0 && (

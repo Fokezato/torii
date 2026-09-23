@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { browseSeason, browseTrending, anilistSearch, type AnimeSummary } from "@/lib/anilist";
 import { HeroCarousel } from "@/components/anime/HeroCarousel";
 import { ContentRow } from "@/components/anime/ContentRow";
-import { GenreFilterBar } from "@/components/anime/GenreFilterBar";
+import { ALL_GENRES, GenreFilterBar } from "@/components/anime/GenreFilterBar";
 import { MyListRow } from "@/components/anime/MyListRow";
 import { WeeklySchedule } from "@/components/anime/WeeklySchedule";
 import { NewsSection } from "@/components/anime/NewsSection";
@@ -12,10 +13,11 @@ import { WatchFormModal } from "@/components/anime/WatchFormModal";
 import { useSearchStore } from "@/stores/search";
 
 export default function Home() {
+  const { t } = useTranslation();
   const term = useSearchStore((s) => s.term);
   const [detailTarget, setDetailTarget] = useState<AnimeSummary | null>(null);
   const [addTarget, setAddTarget] = useState<AnimeSummary | null>(null);
-  const [genre, setGenre] = useState("Todos");
+  const [genre, setGenre] = useState<string>(ALL_GENRES);
   const isSearching = term.trim().length > 0;
 
   const season = useQuery({ queryKey: ["season"], queryFn: () => browseSeason() });
@@ -38,7 +40,7 @@ export default function Home() {
   }, [season.data]);
 
   const filteredSeason = useMemo(() => {
-    if (genre === "Todos") return season.data;
+    if (genre === ALL_GENRES) return season.data;
     return season.data?.filter((a) => a.genres.includes(genre));
   }, [season.data, genre]);
 
@@ -48,7 +50,7 @@ export default function Home() {
 
       {isSearching ? (
         <ContentRow
-          title={`Resultados para "${term}"`}
+          title={t("home.results", { term })}
           items={search.data}
           isLoading={search.isLoading}
           onSelect={setDetailTarget}
@@ -56,8 +58,8 @@ export default function Home() {
       ) : (
         <>
           <ContentRow
-            title="Temporada atual"
-            subtitle={filteredSeason ? `${filteredSeason.length} títulos` : undefined}
+            title={t("home.currentSeason")}
+            subtitle={filteredSeason ? t("home.titleCount", { count: filteredSeason.length }) : undefined}
             items={filteredSeason}
             isLoading={season.isLoading}
             onSelect={setDetailTarget}
@@ -68,7 +70,7 @@ export default function Home() {
             }
           />
           <ContentRow
-            title="Em alta"
+            title={t("home.trending")}
             items={trending.data}
             isLoading={trending.isLoading}
             onSelect={setDetailTarget}

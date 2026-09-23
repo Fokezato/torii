@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { TriangleAlert } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Switch } from "@/components/ui/switch";
 import {
   AlertDialog,
@@ -12,25 +13,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-export type ReduceSizeFeature = "strip_audio" | "downscale";
-
-export const REDUCE_SIZE_FEATURES: Record<
-  ReduceSizeFeature,
-  { label: string; description: string; warning: string }
-> = {
-  strip_audio: {
-    label: "Remover áudios extras",
-    description: "Deixa só os áudios nos idiomas preferidos (Reprodução) e o japonês original. Sem perder qualidade.",
-    warning:
-      "Os áudios em outros idiomas são apagados de dentro do arquivo. Pra ter eles de volta, só baixando o episódio de novo.",
-  },
-  downscale: {
-    label: "Reduzir resolução pra 720p",
-    description: "Recodifica o vídeo depois de baixar (~3 min por episódio com placa de vídeo, mais no processador).",
-    warning:
-      "O vídeo original é substituído por uma versão 720p, um pouco menos nítida. Pra ter a qualidade original de volta, só baixando o episódio de novo.",
-  },
-};
+export type ReduceSizeFeature = "stripAudio" | "downscale";
 
 /// Chave de opção que mexe no arquivo sem volta: LIGAR pede confirmação
 /// (aviso de irreversível + botão Confirmar); desligar é direto — não
@@ -50,21 +33,22 @@ export function IrreversibleToggle({
   /** "global": vale pra todos os animes; "anime": só esse. Muda o texto do aviso. */
   scope: "global" | "anime";
 }) {
+  const { t } = useTranslation();
   const [confirming, setConfirming] = useState(false);
-  const info = REDUCE_SIZE_FEATURES[feature];
+  const label = t(`reduceSize.${feature}.label`);
 
   return (
     <>
       <div className="flex items-center justify-between gap-5">
         <div className="flex flex-col gap-0.5">
           <span className="flex items-center gap-2 text-[13px] font-semibold">
-            {info.label}
+            {label}
             <span className="rounded-full border border-primary/40 px-1.5 py-0.5 text-[9px] font-bold tracking-wide text-primary uppercase">
-              Beta
+              {t("common.beta")}
             </span>
           </span>
           <span className="text-[11.5px] text-[#6C7180]">
-            {forcedOn ? "Ligado pra todos os animes em Configurações." : info.description}
+            {forcedOn ? t("reduceSize.forcedOn") : t(`reduceSize.${feature}.description`)}
           </span>
         </div>
         <Switch
@@ -79,24 +63,22 @@ export function IrreversibleToggle({
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2">
               <TriangleAlert className="size-5 text-[#E5A34B]" />
-              {info.label}: não tem volta
+              {t("reduceSize.confirmTitle", { feature: label })}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {info.warning}{" "}
-              {scope === "global"
-                ? "Vale pra TODOS os animes, inclusive os episódios que você já baixou."
-                : "Vale pra todos os episódios desse anime, inclusive os que já foram baixados."}
+              {t(`reduceSize.${feature}.warning`)}{" "}
+              {scope === "global" ? t("reduceSize.scopeGlobal") : t("reduceSize.scopeAnime")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
                 onCheckedChange(true);
                 setConfirming(false);
               }}
             >
-              Confirmar
+              {t("common.confirm")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, FolderOpen, Inbox, Pause, Play, Users, X } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { getStorageStats } from "@/lib/stats";
 import { formatBytes } from "@/lib/format";
@@ -51,10 +52,10 @@ function useDismissedDownloads() {
 }
 
 const FILTERS = [
-  { id: "downloading", label: "Ativos" },
-  { id: "available", label: "Concluídos" },
-  { id: "error", label: "Erros" },
-  { id: "all", label: "Todos" },
+  { id: "downloading", labelKey: "downloads.filterActive" },
+  { id: "available", labelKey: "downloads.filterDone" },
+  { id: "error", labelKey: "downloads.filterErrors" },
+  { id: "all", labelKey: "downloads.filterAll" },
 ] as const;
 
 function StatTile({ label, value, icon }: { label: string; value: string; icon?: React.ReactNode }) {
@@ -95,21 +96,22 @@ function IconBtn({
 }
 
 function StatusBadge({ status, paused }: { status: Episode["status"]; paused: boolean }) {
+  const { t } = useTranslation();
   if (paused) {
     return (
       <span
         className="rounded-[5px] px-[7px] py-[3px] text-[9px] font-bold tracking-wide uppercase"
         style={{ color: "#D7D9DE", background: "rgba(255,255,255,0.12)" }}
       >
-        Pausado
+        {t("downloads.paused")}
       </span>
     );
   }
   const map: Record<string, { label: string; bg: string; fg: string }> = {
-    downloading: { label: "Baixando", bg: "#FF6A45", fg: "#0B0C10" },
-    available: { label: "Concluído", bg: "#6FC48A", fg: "#0B0C10" },
-    error: { label: "Erro", bg: "#E5484D", fg: "#0B0C10" },
-    found: { label: "Iniciando", bg: "transparent", fg: "#B5B9C4" },
+    downloading: { label: t("episodeStatus.downloading"), bg: "#FF6A45", fg: "#0B0C10" },
+    available: { label: t("downloads.done"), bg: "#6FC48A", fg: "#0B0C10" },
+    error: { label: t("episodeStatus.error"), bg: "#E5484D", fg: "#0B0C10" },
+    found: { label: t("episodeStatus.found"), bg: "transparent", fg: "#B5B9C4" },
   };
   const s = map[status] ?? { label: status, bg: "transparent", fg: "#B5B9C4" };
   return (
@@ -145,6 +147,7 @@ function EpisodeRow({
   onDismiss: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
   const totalBytes = progress?.total_bytes ?? 0;
   const progressBytes = progress?.progress_bytes ?? 0;
   const pct = totalBytes > 0 ? Math.min(100, (progressBytes / totalBytes) * 100) : 0;
@@ -203,7 +206,7 @@ function EpisodeRow({
                   {progress?.eta_human && <span>ETA {progress.eta_human}</span>}
                 </>
               )}
-              {isPaused && <span>Pausado manualmente</span>}
+              {isPaused && <span>{t("downloads.pausedManually")}</span>}
             </div>
           </>
         )}
@@ -216,26 +219,26 @@ function EpisodeRow({
       <div className="flex shrink-0 items-center gap-2">
         {isDownloading &&
           (isPaused ? (
-            <IconBtn label="Retomar download" onClick={onResume} color="#FF6A45">
+            <IconBtn label={t("downloads.resume")} onClick={onResume} color="#FF6A45">
               <Play className="size-3.5" fill="currentColor" />
             </IconBtn>
           ) : (
-            <IconBtn label="Pausar download" onClick={onPause}>
+            <IconBtn label={t("downloads.pause")} onClick={onPause}>
               <Pause className="size-3.5" fill="currentColor" />
             </IconBtn>
           ))}
         <IconBtn
-          label="Abrir pasta"
+          label={t("downloads.openFolder")}
           onClick={() => episode.save_path && openPath(episode.save_path)}
         >
           <FolderOpen className="size-3.5" />
         </IconBtn>
         {episode.status === "available" ? (
-          <IconBtn label="Remover do histórico" onClick={onDismiss}>
+          <IconBtn label={t("downloads.removeFromHistory")} onClick={onDismiss}>
             <X className="size-3.5" />
           </IconBtn>
         ) : (
-          <IconBtn label="Cancelar download" onClick={onCancel} color="#E5484D">
+          <IconBtn label={t("downloads.cancel")} onClick={onCancel} color="#E5484D">
             <X className="size-3.5" />
           </IconBtn>
         )}
@@ -245,6 +248,7 @@ function EpisodeRow({
 }
 
 export default function Downloads() {
+  const { t } = useTranslation();
   const [filter, setFilter] = useState<(typeof FILTERS)[number]["id"]>("all");
   const [progressByEpisode, setProgressByEpisode] = useState<Record<number, DownloadProgress>>({});
   const { dismissed, dismiss } = useDismissedDownloads();
@@ -309,27 +313,30 @@ export default function Downloads() {
     <div className="flex flex-col gap-[22px]">
       <div className="flex items-baseline justify-between">
         <div className="flex items-baseline gap-3">
-          <h1 className="text-[26px] font-bold">Downloads</h1>
-          <span className="text-[13px] text-[#6C7180]">{visibleEpisodes.length} itens</span>
+          <h1 className="text-[26px] font-bold">{t("nav.downloads")}</h1>
+          <span className="text-[13px] text-[#6C7180]">{t("downloads.itemCount", { count: visibleEpisodes.length })}</span>
         </div>
       </div>
 
       <div className="flex gap-3.5">
-        <StatTile label="Baixando agora" value={`${counts.downloading ?? 0} torrents`} />
         <StatTile
-          label="Velocidade de download"
+          label={t("downloads.downloadingNow")}
+          value={t("downloads.torrentCount", { count: counts.downloading ?? 0 })}
+        />
+        <StatTile
+          label={t("downloads.downloadSpeed")}
           value={`${totalDownloadSpeed.toFixed(1)} MB/s`}
           icon={<ArrowDown className="size-3" />}
         />
         <StatTile
-          label="Velocidade de upload"
+          label={t("downloads.uploadSpeed")}
           value={`${totalUploadSpeed.toFixed(1)} MB/s`}
           icon={<ArrowUp className="size-3" />}
         />
-        <StatTile label="Espaço usado" value={formatBytes(storage?.used_bytes ?? 0)} />
+        <StatTile label={t("downloads.spaceUsed")} value={formatBytes(storage?.used_bytes ?? 0)} />
       </div>
 
-      <nav aria-label="Filtrar downloads" className="flex items-center gap-2">
+      <nav aria-label={t("downloads.filter")} className="flex items-center gap-2">
         {FILTERS.map((f) => (
           <button
             key={f.id}
@@ -342,7 +349,7 @@ export default function Downloads() {
                 : "border border-[#23262F] text-[#B5B9C4] hover:text-foreground"
             }`}
           >
-            {f.label} · {f.id === "all" ? visibleEpisodes.length : (counts[f.id] ?? 0)}
+            {t(f.labelKey)} · {f.id === "all" ? visibleEpisodes.length : (counts[f.id] ?? 0)}
           </button>
         ))}
       </nav>
@@ -352,11 +359,8 @@ export default function Downloads() {
           <span className="flex size-12 items-center justify-center rounded-full bg-secondary text-[#6C7180]">
             <Inbox className="size-5" />
           </span>
-          <p className="text-sm font-semibold">Nenhum torrent por aqui</p>
-          <p className="max-w-sm text-xs text-[#6C7180]">
-            Assim que um episódio novo for encontrado pra um anime da sua biblioteca, o download começa
-            automaticamente e aparece aqui.
-          </p>
+          <p className="text-sm font-semibold">{t("downloads.emptyTitle")}</p>
+          <p className="max-w-sm text-xs text-[#6C7180]">{t("downloads.emptyText")}</p>
         </div>
       ) : (
         <div className="flex flex-col gap-2.5">

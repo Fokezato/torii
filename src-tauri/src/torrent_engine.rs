@@ -46,10 +46,10 @@ impl TorrentEngine {
             self.session.add_torrent(AddTorrent::from_url(magnet), Some(opts)),
         )
         .await
-        .map_err(|_| anyhow::anyhow!("timeout resolvendo metadata do torrent (sem peers respondendo)"))??;
+        .map_err(|_| anyhow::anyhow!(tr!("timeout resolvendo metadata do torrent (sem peers respondendo)", "timed out resolving torrent metadata (no peers responding)")))??;
         let handle = response
             .into_handle()
-            .ok_or_else(|| anyhow::anyhow!("torrent ficou list-only, sem handle pra rastrear"))?;
+            .ok_or_else(|| anyhow::anyhow!(tr!("torrent ficou list-only, sem handle pra rastrear", "torrent ended up list-only, no handle to track")))?;
         let info_hash = handle.info_hash().as_string();
         self.active.lock().await.insert(episode_id, handle);
         Ok(info_hash)

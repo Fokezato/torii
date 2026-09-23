@@ -44,6 +44,8 @@ import { listWatchEpisodes, type Episode } from "@/lib/episodes";
 import { formatPlayerTitle, parseEpisodeLabel, parseEpisodeNumber } from "@/lib/episodeName";
 import { listWatches, type Watch } from "@/lib/watches";
 import { getSettings } from "@/lib/tauri";
+import { episodeStatusLabel } from "@/lib/constants";
+import { useTranslation } from "react-i18next";
 import {
   findPreferredTrack,
   humanizeTrackLanguage,
@@ -72,11 +74,7 @@ function formatTime(ms: number): string {
 
 type SegmentKind = "intro" | "ending" | "recap";
 
-const SEGMENT_KINDS: { kind: SegmentKind; label: string; skipLabel: string }[] = [
-  { kind: "recap", label: "Resumo", skipLabel: "Pular resumo" },
-  { kind: "intro", label: "Abertura", skipLabel: "Pular abertura" },
-  { kind: "ending", label: "Encerramento", skipLabel: "Pular encerramento" },
-];
+const SEGMENT_KINDS: SegmentKind[] = ["recap", "intro", "ending"];
 
 type SkipSettings = {
   auto: Record<SegmentKind, boolean>;
@@ -132,14 +130,6 @@ async function openNextEpisode(snap: PlayerSnapshot): Promise<boolean> {
   return true;
 }
 
-const EPISODE_STATUS_LABEL: Record<string, string> = {
-  pending: "Procurando",
-  found: "Iniciando",
-  downloading: "Baixando",
-  available: "Pronto",
-  error: "Erro",
-};
-
 /// Janela transparente por cima do vídeo (ver `spawn_player_overlay_window`
 /// no lib.rs — `.owner()` mantém ela sempre acima da janela principal,
 /// criada 1x no boot). Some sozinha com o mouse parado, igual Netflix/
@@ -147,6 +137,7 @@ const EPISODE_STATUS_LABEL: Record<string, string> = {
 /// play/pause. "Voltar" e "próximo episódio" só emitem evento — quem tem
 /// o contexto de navegação (a página que abriu o player) escuta.
 export default function PlayerOverlay() {
+  const { t } = useTranslation();
   const [snapshot, setSnapshot] = useState<PlayerSnapshot | null>(null);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [scrubbingPct, setScrubbingPct] = useState<number | null>(null);
@@ -300,7 +291,7 @@ export default function PlayerOverlay() {
           }
 
           if (skipSegments) {
-            for (const { kind } of SEGMENT_KINDS) {
+            for (const kind of SEGMENT_KINDS) {
               const range = segmentRange(skipSegments, kind);
               if (
                 range &&
@@ -397,14 +388,14 @@ export default function PlayerOverlay() {
   let activeSkip: { label: string; endMs: number } | null = null;
   if (skipSegments && durationMs > 0) {
     const toPct = (ms: number) => Math.min(100, Math.max(0, (ms / durationMs) * 100));
-    for (const { kind, label, skipLabel } of SEGMENT_KINDS) {
+    for (const kind of SEGMENT_KINDS) {
       const range = segmentRange(skipSegments, kind);
       if (!range) continue;
       if (skipSettings.mark[kind]) {
-        segmentMarks.push({ startPct: toPct(range[0]), endPct: toPct(range[1]), label });
+        segmentMarks.push({ startPct: toPct(range[0]), endPct: toPct(range[1]), label: t(`player.segment.${kind}`) });
       }
       if (!skipSettings.auto[kind] && positionMs >= range[0] && positionMs < range[1]) {
-        activeSkip = { label: skipLabel, endMs: range[1] };
+        activeSkip = { label: t(`player.skip.${kind}`), endMs: range[1] };
       }
     }
   }
@@ -479,7 +470,7 @@ export default function PlayerOverlay() {
       >
         <button
           type="button"
-          aria-label="Voltar"
+          aria-label={t("common.back")}
           onClick={() => emit("player:back-requested")}
           className="flex size-9 shrink-0 items-center justify-center rounded-full text-white transition-colors hover:bg-white/15"
         >
@@ -509,7 +500,7 @@ export default function PlayerOverlay() {
         >
           <button
             type="button"
-            aria-label="Voltar 10 segundos"
+            aria-label={t("player.back10")}
             onClick={() => playerSeekRelative(-SKIP_MS).catch(() => {})}
             className="relative flex size-12 items-center justify-center text-white/90 transition-colors hover:text-white"
           >
@@ -518,7 +509,7 @@ export default function PlayerOverlay() {
           </button>
           <button
             type="button"
-            aria-label={isPaused ? "Play" : "Pause"}
+            aria-label={isPaused ? t("player.play") : t("player.pause")}
             onClick={togglePause}
             className="flex size-16 items-center justify-center rounded-full bg-white/15 text-white backdrop-blur-sm transition-colors hover:bg-white/25"
           >
@@ -530,7 +521,7 @@ export default function PlayerOverlay() {
           </button>
           <button
             type="button"
-            aria-label="Avançar 10 segundos"
+            aria-label={t("player.forward10")}
             onClick={() => playerSeekRelative(SKIP_MS).catch(() => {})}
             className="relative flex size-12 items-center justify-center text-white/90 transition-colors hover:text-white"
           >
@@ -588,7 +579,7 @@ export default function PlayerOverlay() {
 
             <button
               type="button"
-              aria-label="Episódios"
+              aria-label={t("detail.episodes")}
               data-episodes-toggle
               onClick={() => setOpenMenu((m) => (m === "episodes" ? null : "episodes"))}
               className={`flex size-8 items-center justify-center rounded-full transition-colors ${
@@ -600,7 +591,7 @@ export default function PlayerOverlay() {
 
             <button
               type="button"
-              aria-label="Próximo episódio"
+              aria-label={t("player.nextEpisode")}
               onClick={() => {
                 if (snapshot) openNextEpisode(snapshot).catch(() => {});
               }}
@@ -616,7 +607,7 @@ export default function PlayerOverlay() {
             >
               <button
                 type="button"
-                aria-label={volume > 0 ? "Mudo" : "Ativar som"}
+                aria-label={volume > 0 ? t("player.mute") : t("player.unmute")}
                 onClick={() => {
                   changeVolume(volume > 0 ? 0 : 80);
                   releaseVolume();
@@ -640,7 +631,7 @@ export default function PlayerOverlay() {
 
             <button
               type="button"
-              aria-label="Tela cheia"
+              aria-label={t("player.fullscreen")}
               onClick={() => emit("player:toggle-fullscreen-requested")}
               className="flex size-8 items-center justify-center rounded-full text-white transition-colors hover:bg-white/10"
             >
@@ -665,9 +656,10 @@ export default function PlayerOverlay() {
 /// "Temporada 3 - Episódio 1 - Título" (ver `formatPlayerTitle`) → tag
 /// "Temporada 3" + resto do texto.
 function EpisodeHeading({ label }: { label: string }) {
-  // Tudo antes de " - Episódio" é o nome da temporada ("Temporada 3",
-  // "Entertainment District Arc"...) — vira a tag.
-  const match = label.match(/^(.+?)\s+-\s+(?=Episódio)/);
+  // Tudo antes de " - Episódio/Episode" é o nome da temporada ("Temporada 3",
+  // "Entertainment District Arc"...) — vira a tag. Os 2 idiomas: o rótulo é
+  // montado no idioma de quando o episódio foi aberto.
+  const match = label.match(/^(.+?)\s+-\s+(?=Episódio|Episode)/);
   return (
     <h2 className="flex min-w-0 items-center gap-2 text-sm text-white/75">
       {match && (
@@ -912,6 +904,7 @@ function EpisodeDetails({
   preferredSubtitle: string[];
   onPlay: (() => void) | null;
 }) {
+  const { t } = useTranslation();
   const source = episodeSource(episode);
   const [probe, setProbe] = useState<MediaProbe | undefined>(source ? probeCache.get(source) : undefined);
   const [thumb, setThumb] = useState<string | undefined>(source ? thumbCache.get(source) : undefined);
@@ -974,7 +967,7 @@ function EpisodeDetails({
 
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="rounded-md bg-white/10 px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-white/80 uppercase">
-          {EPISODE_STATUS_LABEL[episode.status] ?? episode.status}
+          {episodeStatusLabel(episode.status)}
         </span>
         {quality && (
           <span className="rounded-md border border-white/20 px-1.5 py-0.5 text-[10px] font-bold text-white/80">
@@ -984,14 +977,14 @@ function EpisodeDetails({
       </div>
 
       {!source ? (
-        <p className="text-[11px] text-white/45">Ainda não baixado — áudio e legenda aparecem quando o episódio estiver pronto.</p>
+        <p className="text-[11px] text-white/45">{t("player.notDownloadedYet")}</p>
       ) : failed ? (
-        <p className="text-[11px] text-white/45">Não foi possível ler o arquivo.</p>
+        <p className="text-[11px] text-white/45">{t("player.readFailed")}</p>
       ) : (
         probe && (
           <>
-            <ChipRow label="Áudio" chips={audio} />
-            <ChipRow label="Legenda" chips={subtitles} />
+            <ChipRow label={t("detail.audio")} chips={audio} />
+            <ChipRow label={t("detail.subtitle")} chips={subtitles} />
           </>
         )
       )}
@@ -1000,11 +993,12 @@ function EpisodeDetails({
 }
 
 function ChipRow({ label, chips }: { label: string; chips: { label: string; original: boolean; tag: string | null }[] }) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-col gap-1">
       <span className="text-[10px] font-bold tracking-wide text-white/45 uppercase">{label}</span>
       {chips.length === 0 ? (
-        <span className="text-[11px] text-white/45">Nenhuma</span>
+        <span className="text-[11px] text-white/45">{t("player.none")}</span>
       ) : (
         <div className="flex flex-wrap gap-1">
           {chips.map((c) => (
@@ -1013,7 +1007,7 @@ function ChipRow({ label, chips }: { label: string; chips: { label: string; orig
               className="flex items-center gap-1 rounded-md bg-white/10 px-1.5 py-0.5 text-[11px] text-white/85"
             >
               {c.label}
-              {c.original && <span className="text-[9px] font-bold text-primary uppercase">Original</span>}
+              {c.original && <span className="text-[9px] font-bold text-primary uppercase">{t("player.original")}</span>}
               {c.tag && <span className="text-[9px] font-bold text-white/55 uppercase">{c.tag}</span>}
             </span>
           ))}
@@ -1042,6 +1036,7 @@ function EpisodesPanel({
   preferredSubtitle: string[];
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   // Precisa do título CRU do watch (com "Season N" ainda dentro) pra montar
@@ -1089,10 +1084,10 @@ function EpisodesPanel({
       onClick={(e) => e.stopPropagation()}
     >
       <div className="flex items-center justify-between border-b border-white/10 px-4 py-3.5">
-        <span className="text-sm font-bold text-white">Episódios</span>
+        <span className="text-sm font-bold text-white">{t("detail.episodes")}</span>
         <button
           type="button"
-          aria-label="Fechar"
+          aria-label={t("common.close")}
           onClick={onClose}
           className="flex size-7 items-center justify-center rounded-full text-white/70 transition-colors hover:bg-white/10 hover:text-white"
         >
@@ -1101,9 +1096,9 @@ function EpisodesPanel({
       </div>
       <div className="flex flex-1 flex-col gap-1 overflow-y-auto p-2">
         {watchId == null ? (
-          <p className="px-2 py-4 text-center text-xs text-white/50">Sem anime associado a esse player.</p>
+          <p className="px-2 py-4 text-center text-xs text-white/50">{t("player.noAnime")}</p>
         ) : sorted.length === 0 ? (
-          <p className="px-2 py-4 text-center text-xs text-white/50">Nenhum episódio ainda.</p>
+          <p className="px-2 py-4 text-center text-xs text-white/50">{t("player.noEpisodes")}</p>
         ) : (
           sorted.map((ep) => {
             const expanded = expandedId === ep.id;
@@ -1123,14 +1118,14 @@ function EpisodesPanel({
                     <span className="truncate">{parseEpisodeLabel(ep.name, ep.episode_number)}</span>
                     {isCurrent && (
                       <span className="shrink-0 rounded bg-primary/20 px-1 py-px text-[9px] font-bold text-primary uppercase">
-                        Assistindo
+                        {t("player.watching")}
                       </span>
                     )}
                   </span>
                   <span className="flex shrink-0 items-center gap-2">
                     {!expanded && (
                       <span className="text-[10px] font-bold tracking-wide text-white/50 uppercase">
-                        {EPISODE_STATUS_LABEL[ep.status] ?? ep.status}
+                        {episodeStatusLabel(ep.status)}
                       </span>
                     )}
                     <ChevronDown
@@ -1171,6 +1166,7 @@ function TrackPickerButton({
   open: boolean;
   setOpen: (open: boolean) => void;
 }) {
+  const { t } = useTranslation();
   const [audioTracks, setAudioTracks] = useState<TrackInfo[]>([]);
   const [subtitleTracks, setSubtitleTracks] = useState<TrackInfo[]>([]);
 
@@ -1189,15 +1185,17 @@ function TrackPickerButton({
   // Legenda continua podendo desabilitar (comum assistir dublado sem
   // legenda nenhuma) — id < 0 = entrada "Desabilitado" do próprio libvlc,
   // sempre mostra ali, não é idioma pra filtrar por preferência.
-  const filteredAudio = audioTracks.filter((t) => t.id >= 0 && trackMatchesPreferred(t.name, preferredAudio));
-  const filteredSubtitle = subtitleTracks.filter((t) => t.id < 0 || trackMatchesPreferred(t.name, preferredSubtitle));
+  const filteredAudio = audioTracks.filter((track) => track.id >= 0 && trackMatchesPreferred(track.name, preferredAudio));
+  const filteredSubtitle = subtitleTracks.filter(
+    (track) => track.id < 0 || trackMatchesPreferred(track.name, preferredSubtitle),
+  );
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button
           type="button"
-          aria-label="Áudio e legenda"
+          aria-label={t("player.audioAndSubtitles")}
           onClick={(e) => e.stopPropagation()}
           className="flex size-8 items-center justify-center rounded-full text-white transition-colors hover:bg-white/10"
         >
@@ -1211,13 +1209,13 @@ function TrackPickerButton({
         className="max-h-[60vh] w-64 overflow-y-auto border-[#262A35] bg-[#15171D] p-1.5 text-foreground"
       >
         <TrackSection
-          label="Áudio"
+          label={t("detail.audio")}
           tracks={filteredAudio}
           onSelect={(id) => playerSetAudioTrack(id).then(() => setOpen(false))}
         />
         <div className="my-1.5 h-px bg-[#1E212A]" />
         <TrackSection
-          label="Legenda"
+          label={t("detail.subtitle")}
           tracks={filteredSubtitle}
           onSelect={(id) => playerSetSubtitleTrack(id).then(() => setOpen(false))}
         />
@@ -1235,29 +1233,31 @@ function TrackSection({
   tracks: TrackInfo[];
   onSelect: (id: number) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-col gap-0.5">
       <span className="px-2 py-1 text-[10px] font-bold tracking-wide text-[#6C7180] uppercase">{label}</span>
       {tracks.length === 0 ? (
-        <span className="px-2 py-1 text-xs text-[#6C7180]">Nenhuma</span>
+        <span className="px-2 py-1 text-xs text-[#6C7180]">{t("player.none")}</span>
       ) : (
-        tracks.map((t) => {
-          const tag = trackQualifierTag(t.name);
-          const original = t.id >= 0 && isOriginalTrack(t.name);
+        tracks.map((track) => {
+          const tag = trackQualifierTag(track.name);
+          const original = track.id >= 0 && isOriginalTrack(track.name);
           return (
             <button
-              key={t.id}
+              key={track.id}
               type="button"
-              onClick={() => onSelect(t.id)}
+              onClick={() => onSelect(track.id)}
               className={`flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors ${
-                t.active ? "bg-secondary text-primary" : "hover:bg-white/5"
+                track.active ? "bg-secondary text-primary" : "hover:bg-white/5"
               }`}
             >
               <span className="flex min-w-0 items-center gap-1.5">
-                <span className="truncate">{t.id < 0 ? t.name : humanizeTrackLanguage(t.name)}</span>
+                {/* id < 0 = "Desabilitar" do próprio libvlc (vem em inglês). */}
+                <span className="truncate">{track.id < 0 ? t("player.disable") : humanizeTrackLanguage(track.name)}</span>
                 {original && (
                   <span className="shrink-0 rounded-full bg-primary/20 px-1.5 py-0.5 text-[9px] font-bold tracking-wide text-primary uppercase">
-                    Original
+                    {t("player.original")}
                   </span>
                 )}
                 {tag && (
@@ -1266,7 +1266,7 @@ function TrackSection({
                   </span>
                 )}
               </span>
-              {t.active && <Check className="size-3.5 shrink-0" />}
+              {track.active && <Check className="size-3.5 shrink-0" />}
             </button>
           );
         })

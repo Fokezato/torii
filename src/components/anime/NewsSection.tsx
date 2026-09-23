@@ -1,10 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { useTranslation } from "react-i18next";
 import { getAnimeNews } from "@/lib/news";
 import { Skeleton } from "@/components/ui/skeleton";
 import { timeAgo } from "@/lib/format";
 
 export function NewsSection() {
+  const { t } = useTranslation();
   const { data, isLoading } = useQuery({
     queryKey: ["anime-news"],
     queryFn: getAnimeNews,
@@ -19,9 +21,9 @@ export function NewsSection() {
       <div className="flex items-baseline gap-3">
         <div className="flex items-center gap-2.5">
           <span className="h-4 w-1 rounded-full bg-primary" />
-          <h2 className="text-[22px] font-bold tracking-tight">Notícias</h2>
+          <h2 className="text-[22px] font-bold tracking-tight">{t("home.news")}</h2>
         </div>
-        <span className="text-[13px] text-[#6C7180]">via Anime News Network</span>
+        <span className="text-[13px] text-[#6C7180]">{t("home.newsSource")}</span>
       </div>
 
       {isLoading ? (

@@ -104,12 +104,12 @@ impl MediaTools {
         unsafe {
             let media = (api.media_new_path)(self.instance, c_path.as_ptr());
             if media.is_null() {
-                return Err(format!("não conseguiu abrir {path}"));
+                return Err(tr!("não conseguiu abrir {path}", "couldn't open {path}"));
             }
             // flags 0 = só local (sem rede/arte); timeout em ms.
             if (api.media_parse_with_options)(media, 0, 8000) != 0 {
                 (api.media_release)(media);
-                return Err("falha ao iniciar leitura do arquivo".to_string());
+                return Err(tr!("falha ao iniciar leitura do arquivo", "failed to start reading the file"));
             }
             // 1 skipped, 2 failed, 3 timeout, 4 done — 0 = ainda lendo.
             let deadline = Instant::now() + Duration::from_secs(10);
@@ -120,7 +120,7 @@ impl MediaTools {
             }
             if status != 4 {
                 (api.media_release)(media);
-                return Err(format!("leitura do arquivo não concluiu (status {status})"));
+                return Err(tr!("leitura do arquivo não concluiu (status {status})", "file read didn't finish (status {status})"));
             }
 
             let duration_ms = (api.media_get_duration)(media).max(0);
@@ -200,7 +200,7 @@ impl MediaTools {
         let got = unsafe {
             let media = (api.media_new_path)(self.instance, c_path.as_ptr());
             if media.is_null() {
-                return Err(format!("não conseguiu abrir {path}"));
+                return Err(tr!("não conseguiu abrir {path}", "couldn't open {path}"));
             }
             for option in &options {
                 (api.media_add_option)(media, option.as_ptr());
