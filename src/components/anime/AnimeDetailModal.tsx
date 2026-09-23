@@ -2,7 +2,8 @@ import { Plus, Star, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import type { AnimeSummary } from "@/lib/anilist";
-import { seasonLabel, statusLabel } from "@/lib/constants";
+import { genreLabel, seasonLabel, statusLabel } from "@/lib/constants";
+import { TranslatedText } from "@/components/shared/TranslatedText";
 
 interface AnimeDetailModalProps {
   anime: AnimeSummary | null;
@@ -76,14 +77,14 @@ export function AnimeDetailModal({ anime, onOpenChange, onAdd }: AnimeDetailModa
                       key={g}
                       className="rounded-full border border-white/10 bg-white/[0.06] px-2.5 py-1 text-[11px] font-semibold text-[#B5B9C4]"
                     >
-                      {g}
+                      {genreLabel(g)}
                     </span>
                   ))}
                 </div>
               )}
 
               {anime.description && (
-                <p className="text-sm leading-[1.65] text-[#C7CAD3]">{anime.description}</p>
+                <TranslatedText text={anime.description} className="text-sm leading-[1.65] text-[#C7CAD3]" />
               )}
 
               <div className="mt-2 flex items-center justify-between">

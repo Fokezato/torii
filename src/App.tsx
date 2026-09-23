@@ -1,5 +1,6 @@
 import { createHashRouter, RouterProvider } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import i18n from "@/i18n";
 import { AppShell } from "@/components/layout/AppShell";
 import Home from "@/routes/Home";
 import Library from "@/routes/Library";
@@ -11,6 +12,9 @@ import PlayerOverlay from "@/routes/PlayerOverlay";
 import Player from "@/routes/Player";
 
 const queryClient = new QueryClient();
+i18n.on("languageChanged", () => {
+  queryClient.invalidateQueries();
+});
 
 const router = createHashRouter([
   {

@@ -16,3 +16,8 @@ export async function ffmpegStatus(): Promise<FfmpegStatus> {
 export async function ffmpegInstall(): Promise<void> {
   return invoke("ffmpeg_install");
 }
+
+/** Tradução automática com cache no banco; devolve o original se falhar. */
+export async function translateText(text: string, target: string): Promise<string> {
+  return invoke("translate_text", { text, target });
+}

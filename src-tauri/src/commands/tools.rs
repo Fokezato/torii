@@ -19,3 +19,14 @@ pub fn ffmpeg_install(app: AppHandle) {
         }
     });
 }
+
+/// Sinopse traduzida pro idioma `target` ("pt"). Cai no texto original se a
+/// tradução falhar (sem internet, limite do serviço etc.).
+#[tauri::command]
+pub async fn translate_text(
+    state: tauri::State<'_, AppState>,
+    text: String,
+    target: String,
+) -> Result<String, ()> {
+    Ok(crate::sources::translate::translate(&state.http, &state.db, &text, &target).await)
+}

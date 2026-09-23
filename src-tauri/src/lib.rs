@@ -364,6 +364,7 @@ pub fn run() {
             commands::player::player_save_progress,
             commands::tools::ffmpeg_status,
             commands::tools::ffmpeg_install,
+            commands::tools::translate_text,
             commands::player::media_probe,
             commands::player::media_frame,
             commands::jellyfin::test_jellyfin_connection,

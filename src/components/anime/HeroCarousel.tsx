@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Carousel, CarouselContent, CarouselItem, type CarouselApi } from "@/components/ui/carousel";
 import type { AnimeSummary } from "@/lib/anilist";
 import { statusLabel } from "@/lib/constants";
+import { TranslatedText } from "@/components/shared/TranslatedText";
 import { cn } from "@/lib/utils";
 
 interface HeroCarouselProps {
@@ -79,9 +80,10 @@ export function HeroCarousel({ items, onAdd }: HeroCarouselProps) {
                 )}
                 <h1 className="text-4xl leading-[1.05] font-bold tracking-tight">{anime.title}</h1>
                 {anime.description && (
-                  <p className="line-clamp-2 max-w-lg text-sm leading-relaxed text-muted-foreground">
-                    {anime.description}
-                  </p>
+                  <TranslatedText
+                    text={anime.description}
+                    className="line-clamp-2 max-w-lg text-sm leading-relaxed text-muted-foreground"
+                  />
                 )}
                 <div className="flex flex-wrap items-center gap-4 text-xs text-white/50">
                   {anime.studio && <span>{anime.studio}</span>}
