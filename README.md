@@ -1,8 +1,6 @@
 <p align="center">
-  <img src="src-tauri/icons/128x128@2x.png" alt="Torii logo" width="128" height="128">
+  <img src=".github/ToriiBanner.png" alt="Torii" width="640">
 </p>
-
-<h1 align="center">Torii</h1>
 
 <p align="center">
   <b>Your anime hub for Windows.</b><br>
@@ -20,28 +18,31 @@
 
 <p align="center">
   <a href="#-features">Features</a> ·
+  <a href="#-requirements">Requirements</a> ·
   <a href="#-installation">Installation</a> ·
   <a href="#%EF%B8%8F-building-from-source">Building</a> ·
   <a href="#-license">License</a>
 </p>
 
 > [!NOTE]
-> Torii is in **beta**, and the app interface is currently in **Brazilian Portuguese**. English is planned.
+> Torii is in **beta**. The interface is available in English and Brazilian Portuguese.
 
 ## ✨ Features
 
-- 📚 **Catalog.** Current season, trending shows and search, powered by AniList.
-- 🗂️ **Library grouped by anime.** All seasons side by side, with "download another season" right from the anime page.
-- ⬇️ **Automatic downloads.** New episodes are fetched by the built-in torrent engine, filtered by quality, audio and subtitle language.
-- ▶️ **Native player, Netflix style.**
-  - Resumes where you left off.
-  - Picks your preferred audio and subtitle language automatically.
-  - Skips openings, endings and recaps (powered by AniSkip), and can jump straight to the next episode.
-  - Thumbnail previews on the seek bar and an episode panel.
-  - YouTube-style keyboard shortcuts and Windows media keys.
-- 💾 **Disk space savings** (optional). Delete episodes after watching, strip unused audio tracks and downscale to 720p.
-- 🎬 **Jellyfin integration** (optional). Delivers episodes straight to your Jellyfin library folder.
-- 🔔 **Lives in the tray.** Notifications, background checks and start with Windows.
+- 📚 **Catalog and search.** Browse the current season and trending shows, or search any title, powered by AniList.
+- 🗂️ **Organized library.** Every anime in one place, with all of its seasons grouped together.
+- ⬇️ **Automatic downloads.** New episodes are found and downloaded as soon as they are released, matching your preferred quality and language.
+- ▶️ **Native video player.**
+  - Lightweight and optimized.
+  - Automatically skips openings, endings and recaps.
+- 💾 **Storage management** (optional, beta). Options to save disk space.
+- 🎬 **Jellyfin integration** (optional). Sends downloaded episodes straight to your Jellyfin library folder.
+
+## 💻 Requirements
+
+- Windows 10 or 11 (64-bit)
+- [WebView2](https://developer.microsoft.com/microsoft-edge/webview2/) runtime (preinstalled on Windows 11; the installer downloads it if missing)
+- Internet connection for the catalog and downloads
 
 ## 🚀 Installation
 
@@ -50,8 +51,6 @@
 
 > [!IMPORTANT]
 > The installer is not code-signed yet, so Windows shows a blue **"Windows protected your PC"** screen. Click **More info → Run anyway**.
-
-**Requirements:** Windows 10 or 11 (64-bit). [WebView2](https://developer.microsoft.com/microsoft-edge/webview2/) is required and comes preinstalled on Windows 11; the installer downloads it if it's missing.
 
 ## 🛠️ Building from source
 
