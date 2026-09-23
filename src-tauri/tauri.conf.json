@@ -14,7 +14,8 @@
       {
         "title": "Torii",
         "width": 1150,
-        "height": 760
+        "height": 760,
+        "maximized": true
       }
     ],
     "security": {
