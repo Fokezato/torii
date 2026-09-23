@@ -2,43 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
-import { listWatches, seriesKeyOf, seriesTitleOf, type Watch } from "@/lib/watches";
+import { groupBySeries, listWatches, type WatchGroup } from "@/lib/watches";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { LibraryCard } from "@/components/library/LibraryCard";
 import { useSearchStore } from "@/stores/search";
-import { parseSeasonFromTitle } from "@/lib/episodeName";
 import { findContinueEpisode, playEpisode } from "@/lib/continueWatching";
-
-interface WatchGroup {
-  key: string;
-  title: string;
-  representative: Watch;
-  seasons: Watch[];
-}
-
-// Temporadas do mesmo anime viram UM card só na grade (título do anime,
-// sem "Season N") — a temporada vira aba lá dentro. Agrupa pela franquia na
-// AniList (pega temporada sem "Season N" no nome, ex. "Entertainment
-// District Arc"), ou pelo título quando ainda não resolvida.
-// Representante = temporada mais recente (maior anilist_id ≈ mais nova).
-function groupBySeries(watches: Watch[]): WatchGroup[] {
-  const map = new Map<string, Watch[]>();
-  for (const w of watches) {
-    const key = seriesKeyOf(w);
-    const arr = map.get(key);
-    if (arr) arr.push(w);
-    else map.set(key, [w]);
-  }
-  return Array.from(map.entries()).map(([key, seasons]) => {
-    const sorted = [...seasons].sort(
-      (a, b) =>
-        (parseSeasonFromTitle(b.title) ?? 0) - (parseSeasonFromTitle(a.title) ?? 0) ||
-        (b.anilist_id ?? 0) - (a.anilist_id ?? 0),
-    );
-    return { key, title: seriesTitleOf(sorted[0]), representative: sorted[0], seasons: sorted };
-  });
-}
 
 const CARD_SIZES = [
   { id: "sm", labelKey: "library.sizeSmall", width: 290 },
@@ -132,7 +101,7 @@ export default function Library() {
     else if (sort === "rating") sorted.sort((a, b) => (b.representative.rating ?? -1) - (a.representative.rating ?? -1));
     else
       sorted.sort(
-        (a, b) => new Date(b.representative.updated_at).getTime() - new Date(a.representative.updated_at).getTime(),
+        (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
       );
     return sorted;
   }, [groups, filter, search, sort]);

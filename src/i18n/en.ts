@@ -204,6 +204,8 @@ const en: Translation = {
     trending: "Trending",
     allGenres: "All",
     myList: "My list",
+    continue: "Continue",
+    viewAnime: "View anime",
     updated: "Updated {{when}}",
     paused: "paused",
     schedule: "Release calendar",
