@@ -205,6 +205,8 @@ const ptBR = {
     trending: "Em alta",
     allGenres: "Todos",
     myList: "Minha lista",
+    continue: "Continuar",
+    viewAnime: "Ver anime",
     updated: "Atualizado {{when}}",
     paused: "pausado",
     schedule: "Calendário de lançamentos",
