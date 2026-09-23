@@ -1,12 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Play, Star } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { listWatches } from "@/lib/watches";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
-import { STATUS_LABEL } from "@/lib/constants";
+import { statusLabel } from "@/lib/constants";
 import { timeAgo } from "@/lib/format";
 
 export function MyListRow() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { data } = useQuery({ queryKey: ["watches"], queryFn: listWatches });
   const items = (data ?? []).slice(0, 10);
@@ -17,7 +19,7 @@ export function MyListRow() {
     <section className="space-y-3">
       <div className="flex items-center gap-2.5">
         <span className="h-4 w-1 rounded-full bg-primary" />
-        <h2 className="text-lg font-semibold tracking-tight">Minha lista</h2>
+        <h2 className="text-lg font-semibold tracking-tight">{t("home.myList")}</h2>
       </div>
       <ScrollArea className="w-full whitespace-nowrap">
         <div className="flex gap-4 pb-4">
@@ -48,21 +50,21 @@ export function MyListRow() {
                       : "bg-black/55 text-white backdrop-blur-sm"
                   }`}
                 >
-                  {STATUS_LABEL[w.status] ?? w.status}
+                  {statusLabel(w.status)}
                 </span>
               )}
 
               <div className="absolute inset-x-0 bottom-0 p-3">
                 <p className="line-clamp-1 text-sm font-semibold text-white">{w.title}</p>
                 <div className="mt-0.5 flex items-center gap-2 text-xs text-white/65">
-                  <span>Atualizado {timeAgo(w.updated_at)}</span>
+                  <span>{t("home.updated", { when: timeAgo(w.updated_at) })}</span>
                   {w.rating != null && (
                     <span className="flex items-center gap-0.5">
                       <Star className="size-3 fill-yellow-400 text-yellow-400" />
                       {w.rating}
                     </span>
                   )}
-                  {!w.active && <span>· pausado</span>}
+                  {!w.active && <span>· {t("home.paused")}</span>}
                 </div>
               </div>
             </button>

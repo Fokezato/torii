@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { AnimeCard } from "./AnimeCard";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
@@ -14,6 +15,7 @@ interface ContentRowProps {
 }
 
 export function ContentRow({ title, subtitle, items, isLoading, onSelect, extra }: ContentRowProps) {
+  const { t } = useTranslation();
   return (
     <section className="space-y-4">
       <div className="flex items-baseline gap-3">
@@ -32,7 +34,7 @@ export function ContentRow({ title, subtitle, items, isLoading, onSelect, extra 
               <AnimeCard key={anime.anilist_id} anime={anime} onClick={() => onSelect?.(anime)} />
             ))}
           {!isLoading && items?.length === 0 && (
-            <p className="py-8 text-sm text-muted-foreground">Nada encontrado.</p>
+            <p className="py-8 text-sm text-muted-foreground">{t("common.nothingFound")}</p>
           )}
         </div>
         <ScrollBar orientation="horizontal" />

@@ -1,5 +1,6 @@
 import type { TrackInfo } from "@/lib/player";
-import { LANGUAGES } from "@/lib/constants";
+import { languageLabel, languageOptions } from "@/lib/constants";
+import { t } from "@/i18n";
 
 const REGION_TO_CANONICAL: Record<string, string> = {
   brazil: "Brazil",
@@ -17,7 +18,7 @@ const REGION_TO_CANONICAL: Record<string, string> = {
  * "Brazil", "Latin America | Forced", "CC"...) — feio de mostrar direto.
  * Extrai só o idioma entre colchetes (parte confiável), usa o descritor
  * pra achar região quando existe (compõe "Portuguese (Brazil)" igual o
- * valor canônico da lista de idioma do app) e traduz via `LANGUAGES`. */
+ * valor canônico da lista de idioma do app) e traduz (`languages.*`). */
 export function humanizeTrackLanguage(rawName: string): string {
   const bracketMatch = rawName.match(/\[([^\]]+)\]\s*$/);
   const language = (bracketMatch ? bracketMatch[1] : rawName).trim();
@@ -34,8 +35,8 @@ export function humanizeTrackLanguage(rawName: string): string {
   }
 
   const canonical = region ? `${language} (${region})` : language;
-  const known = LANGUAGES.find((l) => l.value.toLowerCase() === canonical.toLowerCase());
-  return known ? known.label : canonical;
+  const known = languageOptions().find((l) => l.value.toLowerCase() === canonical.toLowerCase());
+  return known ? known.label : languageLabel(canonical);
 }
 
 /** "Portuguese (Brazil)" -> "portuguese". Repack MKV geralmente marca a
@@ -106,7 +107,7 @@ const ISO_REGION: Record<string, string> = {
  * player, pra reaproveitar `humanizeTrackLanguage`/`trackMatchesPreferred`. */
 export function probeTrackName(language: string, description: string): string {
   const [code = "", region] = language.toLowerCase().split(/[-_]/);
-  const lang = ISO_LANGUAGE[code] ?? (language || "Desconhecido");
+  const lang = ISO_LANGUAGE[code] ?? (language || "Unknown");
   const regionWord = region ? ISO_REGION[region] : undefined;
   const prefix = [regionWord, description.trim()].filter(Boolean).join(" | ");
   return prefix ? `${prefix} - [${lang}]` : `[${lang}]`;
@@ -126,8 +127,9 @@ export function trackQualifierTag(trackName: string): string | null {
   const lower = trackName.toLowerCase();
   if (lower.includes("forced")) return "Forced";
   if (lower.includes("sdh")) return "SDH";
-  if (lower.includes("descriptive") || lower.includes("descrição") || lower.includes("descritiv")) return "Descritiva";
-  if (lower.includes("commentary") || lower.includes("comentário")) return "Comentário";
+  if (lower.includes("descriptive") || lower.includes("descrição") || lower.includes("descritiv"))
+    return t("player.tagDescriptive");
+  if (lower.includes("commentary") || lower.includes("comentário")) return t("player.tagCommentary");
   if (lower.includes("karaoke") || lower.includes("signs") || lower.includes("songs")) return "Signs/Songs";
   return null;
 }

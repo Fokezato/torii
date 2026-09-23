@@ -2,12 +2,20 @@ use serde::{Serialize, Serializer};
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
-    #[error("erro de banco de dados: {0}")]
+    #[error("{}", db_message(.0))]
     Db(#[from] sqlx::Error),
     #[error("{0}")]
     Fetch(String),
-    #[error("erro no motor de torrent: {0}")]
+    #[error("{}", torrent_message(.0))]
     Torrent(#[from] anyhow::Error),
+}
+
+fn db_message(e: &sqlx::Error) -> String {
+    tr!("erro de banco de dados: {e}", "database error: {e}")
+}
+
+fn torrent_message(e: &anyhow::Error) -> String {
+    tr!("erro no motor de torrent: {e}", "torrent engine error: {e}")
 }
 
 impl Serialize for AppError {

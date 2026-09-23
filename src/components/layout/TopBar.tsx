@@ -1,18 +1,20 @@
 import { useEffect } from "react";
 import { useLocation } from "react-router-dom";
 import { Search, X } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useSearchStore } from "@/stores/search";
 import { Button } from "@/components/ui/button";
 import { ActivityStatus } from "./ActivityStatus";
 
-const PLACEHOLDER_BY_ROUTE: Record<string, string> = {
-  "/": "Buscar animes, estúdios...",
-  "/library": "Buscar na sua biblioteca...",
-};
+const PLACEHOLDER_BY_ROUTE = {
+  "/": "search.home",
+  "/library": "search.library",
+} as const;
 
 export function TopBar() {
   const { term, setTerm } = useSearchStore();
   const location = useLocation();
+  const { t } = useTranslation();
 
   // Cada página usa o termo com um sentido diferente (busca de anime na
   // Home, filtro na Biblioteca) — carregar texto de uma página pra outra
@@ -22,7 +24,8 @@ export function TopBar() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname]);
 
-  const placeholder = PLACEHOLDER_BY_ROUTE[location.pathname];
+  const placeholderKey = PLACEHOLDER_BY_ROUTE[location.pathname as keyof typeof PLACEHOLDER_BY_ROUTE];
+  const placeholder = placeholderKey ? t(placeholderKey) : undefined;
   const showSearch = placeholder != null;
 
   return (

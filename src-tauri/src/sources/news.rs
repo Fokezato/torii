@@ -28,7 +28,7 @@ pub async fn fetch(client: &reqwest::Client) -> Result<Vec<NewsItem>, String> {
         .into_iter()
         .take(12)
         .map(|entry| NewsItem {
-            title: entry.title.map(|t| t.content).unwrap_or_else(|| "Sem título".to_string()),
+            title: entry.title.map(|t| t.content).unwrap_or_else(|| tr!("Sem título", "Untitled")),
             link: entry.links.into_iter().next().map(|l| l.href).unwrap_or_default(),
             summary: entry.summary.map(|s| s.content),
             category: entry.categories.into_iter().next().map(|c| c.term),

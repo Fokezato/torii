@@ -15,12 +15,12 @@ pub async fn test_jellyfin_connection(state: State<'_, AppState>) -> Result<Jell
         .get("jellyfin_url")
         .cloned()
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| AppError::Fetch("configura a URL do Jellyfin antes de testar".to_string()))?;
+        .ok_or_else(|| AppError::Fetch(tr!("configura a URL do Jellyfin antes de testar", "set the Jellyfin URL before testing")))?;
     let api_key = settings
         .get("jellyfin_api_key")
         .cloned()
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| AppError::Fetch("configura a API key do Jellyfin antes de testar".to_string()))?;
+        .ok_or_else(|| AppError::Fetch(tr!("configura a API key do Jellyfin antes de testar", "set the Jellyfin API key before testing")))?;
 
     let info = jellyfin::test_connection(&state.http, &url, &api_key)
         .await

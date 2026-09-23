@@ -1,7 +1,7 @@
 import { motion } from "framer-motion";
 import { Play } from "lucide-react";
 import type { AnimeSummary } from "@/lib/anilist";
-import { STATUS_LABEL } from "@/lib/constants";
+import { statusLabel } from "@/lib/constants";
 
 interface AnimeCardProps {
   anime: AnimeSummary;
@@ -51,7 +51,7 @@ export function AnimeCard({ anime, onClick }: AnimeCardProps) {
         <h3 className="line-clamp-1 text-sm leading-tight font-semibold">{anime.title}</h3>
         <p className="text-[11px] text-[#6C7180]">
           {anime.episodes ? `${anime.episodes} eps` : "? eps"}
-          {anime.status ? ` · ${STATUS_LABEL[anime.status] ?? anime.status}` : ""}
+          {anime.status ? ` · ${statusLabel(anime.status)}` : ""}
         </p>
       </div>
     </div>

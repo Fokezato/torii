@@ -168,7 +168,7 @@ impl From<RawMedia> for AnimeSummary {
             .english
             .or(m.title.romaji)
             .or(m.title.native)
-            .unwrap_or_else(|| "Sem título".to_string());
+            .unwrap_or_else(|| tr!("Sem título", "Untitled"));
         AnimeSummary {
             anilist_id: m.id,
             title,
@@ -233,7 +233,7 @@ async fn graphql_query(
             .join("; ");
         return Err(msg);
     }
-    let data = parsed.data.ok_or_else(|| "resposta vazia da AniList".to_string())?;
+    let data = parsed.data.ok_or_else(|| tr!("resposta vazia da AniList", "empty response from AniList"))?;
     Ok(data.page.media.into_iter().map(AnimeSummary::from).collect())
 }
 

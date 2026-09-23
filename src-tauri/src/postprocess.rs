@@ -27,7 +27,7 @@ pub fn spawn_pending(app: &AppHandle, playing_path: Option<String>) {
 }
 
 fn label_of(ep: &db::episodes::Episode) -> String {
-    ep.name.clone().unwrap_or_else(|| format!("episódio #{}", ep.id))
+    ep.name.clone().unwrap_or_else(|| tr!("episódio #{}", "episode #{}", ep.id))
 }
 
 async fn run_blocking<F>(f: F) -> Result<Outcome, ProcessError>
@@ -86,7 +86,7 @@ async fn process_pending(app: &AppHandle, playing_path: Option<String>) {
             match ffmpeg::ensure_installed(app, &state.http).await {
                 Ok(p) => paths = Some(p),
                 Err(e) => {
-                    state.activity.error(format!("Pós-processamento: {e}"));
+                    state.activity.error(tr!("Pós-processamento: {e}", "Post-processing: {e}"));
                     return;
                 }
             }
@@ -104,13 +104,13 @@ async fn process_pending(app: &AppHandle, playing_path: Option<String>) {
                 Ok(outcome) => {
                     let _ = db::episodes::mark_audio_processed(&state.db, ep.id).await;
                     if let Outcome::Replaced { saved } = outcome {
-                        state.activity.info(format!("Áudios extras removidos (-{} MB): {label}", saved / 1_000_000));
+                        state.activity.info(tr!("Áudios extras removidos (-{} MB): {label}", "Extra audio removed (-{} MB): {label}", saved / 1_000_000));
                     }
                 }
                 Err(ProcessError::Retry) => continue,
                 Err(ProcessError::Permanent(e)) => {
                     let _ = db::episodes::mark_audio_processed(&state.db, ep.id).await;
-                    state.activity.error(format!("Remover áudios extras falhou em \"{label}\": {e}"));
+                    state.activity.error(tr!("Remover áudios extras falhou em \"{label}\": {e}", "Removing extra audio failed on \"{label}\": {e}"));
                 }
             }
         }
@@ -123,18 +123,18 @@ async fn process_pending(app: &AppHandle, playing_path: Option<String>) {
                     .await
                     .unwrap_or(downscale::Encoder::SvtAv1)
             };
-            state.activity.info(format!("Reduzindo resolução ({}): {label}", encoder.label()));
+            state.activity.info(tr!("Reduzindo resolução ({}): {label}", "Downscaling ({}): {label}", encoder.label()));
             match run_blocking(move || downscale::downscale(&p, &file, width, encoder)).await {
                 Ok(outcome) => {
                     let _ = db::episodes::mark_video_processed(&state.db, ep.id).await;
                     if let Outcome::Replaced { saved } = outcome {
-                        state.activity.info(format!("Resolução reduzida (-{} MB): {label}", saved / 1_000_000));
+                        state.activity.info(tr!("Resolução reduzida (-{} MB): {label}", "Downscaled (-{} MB): {label}", saved / 1_000_000));
                     }
                 }
                 Err(ProcessError::Retry) => {}
                 Err(ProcessError::Permanent(e)) => {
                     let _ = db::episodes::mark_video_processed(&state.db, ep.id).await;
-                    state.activity.error(format!("Reduzir resolução falhou em \"{label}\": {e}"));
+                    state.activity.error(tr!("Reduzir resolução falhou em \"{label}\": {e}", "Downscaling failed on \"{label}\": {e}"));
                 }
             }
         }

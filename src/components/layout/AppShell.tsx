@@ -1,13 +1,14 @@
 import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { Download, Home as HomeIcon, Library, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { TopBar } from "./TopBar";
 
 const NAV_ITEMS = [
-  { to: "/", label: "Início", end: true, icon: HomeIcon },
-  { to: "/library", label: "Biblioteca", icon: Library },
-  { to: "/downloads", label: "Downloads", icon: Download },
-];
+  { to: "/", labelKey: "nav.home", end: true, icon: HomeIcon },
+  { to: "/library", labelKey: "nav.library", end: false, icon: Library },
+  { to: "/downloads", labelKey: "nav.downloads", end: false, icon: Download },
+] as const;
 
 function NavButton({
   to,
@@ -40,11 +41,12 @@ function NavButton({
 
 export function AppShell() {
   const location = useLocation();
+  const { t } = useTranslation();
 
   return (
     <div className="flex h-screen bg-background text-foreground">
       <nav
-        aria-label="Navegação principal"
+        aria-label={t("nav.main")}
         className="flex w-[88px] shrink-0 flex-col items-center gap-9 border-r border-border bg-sidebar py-6"
       >
         <span
@@ -62,15 +64,15 @@ export function AppShell() {
 
         <div className="flex flex-col items-center gap-2">
           {NAV_ITEMS.map((item) => (
-            <NavButton key={item.to} {...item} />
+            <NavButton key={item.to} to={item.to} end={item.end} icon={item.icon} label={t(item.labelKey)} />
           ))}
         </div>
 
         <div className="mt-auto flex flex-col items-center gap-5">
           <NavLink
             to="/config"
-            aria-label="Configurações"
-            title="Configurações"
+            aria-label={t("nav.settings")}
+            title={t("nav.settings")}
             className={cn(
               "flex size-11 items-center justify-center rounded-xl transition-colors",
               location.pathname === "/config"

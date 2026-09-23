@@ -1,9 +1,8 @@
 import { useState } from "react";
 import { Check, Plus, X } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { LANGUAGES } from "@/lib/constants";
-
-const ALL_OPTIONS = LANGUAGES.filter((l) => l.value !== "any");
+import { languageOptions } from "@/lib/constants";
 
 interface LanguageTagPickerProps {
   selected: string[];
@@ -20,7 +19,9 @@ interface LanguageTagPickerProps {
 }
 
 export function LanguageTagPicker({ selected, onChange, available }: LanguageTagPickerProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const ALL_OPTIONS = languageOptions().filter((l) => l.value !== "any");
   const OPTIONS =
     available && available.length > 0 ? ALL_OPTIONS.filter((o) => available.includes(o.value)) : ALL_OPTIONS;
 
@@ -31,9 +32,9 @@ export function LanguageTagPicker({ selected, onChange, available }: LanguageTag
 
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      {selected.length === 0 && <span className="text-xs text-[#6C7180]">Qualquer</span>}
+      {selected.length === 0 && <span className="text-xs text-[#6C7180]">{t("common.any")}</span>}
       {selected.map((value) => {
-        const label = OPTIONS.find((o) => o.value === value)?.label ?? value;
+        const label = ALL_OPTIONS.find((o) => o.value === value)?.label ?? value;
         return (
           <span
             key={value}
@@ -43,7 +44,7 @@ export function LanguageTagPicker({ selected, onChange, available }: LanguageTag
             <button
               type="button"
               onClick={() => toggle(value)}
-              aria-label={`Remover ${label}`}
+              aria-label={t("languagePicker.remove", { language: label })}
               className="flex size-3.5 items-center justify-center rounded-full text-[#6C7180] hover:text-foreground"
             >
               <X className="size-3" />
@@ -55,7 +56,7 @@ export function LanguageTagPicker({ selected, onChange, available }: LanguageTag
         <PopoverTrigger asChild>
           <button
             type="button"
-            aria-label="Adicionar idioma"
+            aria-label={t("languagePicker.add")}
             className="flex size-6 items-center justify-center rounded-full border border-[#262A35] bg-[#1B1E27] text-[#9BA0AE] transition-colors hover:text-foreground"
           >
             <Plus className="size-3.5" />

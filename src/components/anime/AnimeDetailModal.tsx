@@ -1,7 +1,8 @@
 import { Plus, Star, X } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import type { AnimeSummary } from "@/lib/anilist";
-import { STATUS_LABEL, SEASON_LABEL } from "@/lib/constants";
+import { seasonLabel, statusLabel } from "@/lib/constants";
 
 interface AnimeDetailModalProps {
   anime: AnimeSummary | null;
@@ -10,6 +11,7 @@ interface AnimeDetailModalProps {
 }
 
 export function AnimeDetailModal({ anime, onOpenChange, onAdd }: AnimeDetailModalProps) {
+  const { t } = useTranslation();
   return (
     <Dialog open={anime !== null} onOpenChange={onOpenChange}>
       <DialogContent
@@ -30,12 +32,12 @@ export function AnimeDetailModal({ anime, onOpenChange, onAdd }: AnimeDetailModa
               <div className="absolute inset-0 bg-gradient-to-t from-[#15171D] via-[#15171D]/10 to-transparent" />
               {anime.status && (
                 <span className="absolute top-4 left-5 rounded-md bg-accent2 px-2.5 py-1 text-[11px] font-bold tracking-wide text-background uppercase">
-                  {STATUS_LABEL[anime.status] ?? anime.status}
+                  {statusLabel(anime.status)}
                 </span>
               )}
               <button
                 type="button"
-                aria-label="Fechar"
+                aria-label={t("common.close")}
                 onClick={() => onOpenChange(false)}
                 className="absolute top-3.5 right-3.5 flex size-8 items-center justify-center rounded-full bg-black/45 text-white transition-colors hover:bg-black/65"
               >
@@ -57,11 +59,11 @@ export function AnimeDetailModal({ anime, onOpenChange, onAdd }: AnimeDetailModa
               <p className="text-[12.5px] text-[#8A8F9C]">
                 {[
                   anime.season_year && anime.season
-                    ? `${anime.season_year} · ${SEASON_LABEL[anime.season] ?? anime.season}`
+                    ? `${anime.season_year} · ${seasonLabel(anime.season)}`
                     : anime.season_year,
                   anime.studio,
-                  anime.duration && `${anime.duration} min/ep`,
-                  anime.episodes && `${anime.episodes} episódios`,
+                  anime.duration && t("common.minPerEpisode", { count: anime.duration }),
+                  anime.episodes && t("common.episodeCount", { count: anime.episodes }),
                 ]
                   .filter(Boolean)
                   .join(" · ")}
@@ -90,7 +92,7 @@ export function AnimeDetailModal({ anime, onOpenChange, onAdd }: AnimeDetailModa
                   onClick={() => onOpenChange(false)}
                   className="px-1.5 py-3 text-[13px] font-semibold text-[#9BA0AE] transition-colors hover:text-foreground"
                 >
-                  Ignorar
+                  {t("common.dismiss")}
                 </button>
                 <button
                   type="button"
@@ -98,7 +100,7 @@ export function AnimeDetailModal({ anime, onOpenChange, onAdd }: AnimeDetailModa
                   className="flex items-center gap-2 rounded-[10px] bg-primary px-[22px] py-3 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
                 >
                   <Plus className="size-4" strokeWidth={2.2} />
-                  Adicionar à biblioteca
+                  {t("common.addToLibrary")}
                 </button>
               </div>
             </div>

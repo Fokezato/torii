@@ -10,7 +10,7 @@ use tauri::{AppHandle, Emitter, Manager};
 fn notify_episode_title(watch_title: &str, raw_episode_title: &str) -> String {
     let (base, _) = nyaa::split_season(watch_title);
     match nyaa::extract_episode_number(raw_episode_title) {
-        Some(ep) => format!("{base} — Episódio {ep}"),
+        Some(ep) => tr!("{base} — Episódio {ep}", "{base} — Episode {ep}"),
         None => base,
     }
 }
@@ -41,7 +41,7 @@ pub async fn start_download(
     match state.torrent.add_download(episode_id, magnet, folder).await {
         Ok(info_hash) => {
             if let Err(e) = db::episodes::mark_downloading(&state.db, episode_id, &info_hash).await {
-                state.activity.error(format!("Erro ao salvar estado de download de \"{clean_title}\": {e}"));
+                state.activity.error(tr!("Erro ao salvar estado de download de \"{clean_title}\": {e}", "Failed to save download state of \"{clean_title}\": {e}"));
                 return;
             }
             state.activity.info(format!("Iniciado download: {clean_title}"));
@@ -50,8 +50,8 @@ pub async fn start_download(
                     app,
                     state,
                     "notify_found",
-                    "Novo episódio encontrado",
-                    format!("{clean_title} — iniciando download"),
+                    tr!("Novo episódio encontrado", "New episode found"),
+                    tr!("{clean_title} — iniciando download", "{clean_title} — starting download"),
                     "info",
                     cover_url,
                 )
@@ -60,13 +60,13 @@ pub async fn start_download(
         }
         Err(e) => {
             let _ = db::episodes::mark_error(&state.db, episode_id, &e.to_string()).await;
-            state.activity.error(format!("Falha ao iniciar download de \"{clean_title}\": {e}"));
+            state.activity.error(tr!("Falha ao iniciar download de \"{clean_title}\": {e}", "Failed to start download of \"{clean_title}\": {e}"));
             notify::notify(
                 app,
                 state,
                 "notify_error",
-                "Falha no download",
-                format!("Não foi possível baixar {clean_title}"),
+                tr!("Falha no download", "Download failed"),
+                tr!("Não foi possível baixar {clean_title}", "Couldn't download {clean_title}"),
                 "error",
                 cover_url,
             )
@@ -98,7 +98,7 @@ pub async fn poll_watch(app: &AppHandle, state: &AppState, watch: &db::watches::
         }
     };
 
-    state.activity.info(format!("Procurando episódios de \"{}\"...", watch.title));
+    state.activity.info(tr!("Procurando episódios de \"{}\"...", "Searching episodes of \"{}\"...", watch.title));
 
     let result = nyaa::find_new_matches(
         &state.http,
@@ -136,7 +136,7 @@ pub async fn poll_watch(app: &AppHandle, state: &AppState, watch: &db::watches::
 
     if result.matched.is_empty() {
         if !result.all_new.is_empty() {
-            state.activity.info(format!("Nada compatível ainda pra \"{}\"", watch.title));
+            state.activity.info(tr!("Nada compatível ainda pra \"{}\"", "Nothing matching yet for \"{}\"", watch.title));
         }
         return;
     }
@@ -190,7 +190,7 @@ pub async fn poll_watch(app: &AppHandle, state: &AppState, watch: &db::watches::
                     // anterior (outra fonte, talvez a mesma) deu erro —
                     // troca a fonte em vez de empilhar linha nova (bug real
                     // reportado: 2 linhas de "Episódio 4", ambas com erro).
-                    state.activity.info(format!("Tentando de novo: {clean_title}"));
+                    state.activity.info(tr!("Tentando de novo: {clean_title}", "Retrying: {clean_title}"));
                 } else {
                     state.activity.info(format!("Encontrado: {clean_title}"));
                 }
@@ -203,14 +203,14 @@ pub async fn poll_watch(app: &AppHandle, state: &AppState, watch: &db::watches::
                 )
                 .await
                 {
-                    state.activity.error(format!("Erro ao salvar fonte de \"{clean_title}\": {e}"));
+                    state.activity.error(tr!("Erro ao salvar fonte de \"{clean_title}\": {e}", "Failed to save source of \"{clean_title}\": {e}"));
                     continue;
                 }
                 if let Err(e) =
                     db::episode_sources::add_many(&state.db, episode.id, candidate, &episode_match.alternates)
                         .await
                 {
-                    state.activity.error(format!("Erro ao salvar fontes de \"{clean_title}\": {e}"));
+                    state.activity.error(tr!("Erro ao salvar fontes de \"{clean_title}\": {e}", "Failed to save sources of \"{clean_title}\": {e}"));
                 }
                 let _ = db::episode_sources::set_active(&state.db, episode.id, &candidate.id).await;
                 start_download(
@@ -230,7 +230,7 @@ pub async fn poll_watch(app: &AppHandle, state: &AppState, watch: &db::watches::
             Ok(_) => {}
             Err(e) => state
                 .activity
-                .error(format!("Erro ao salvar episódio de \"{}\": {e}", watch.title)),
+                .error(tr!("Erro ao salvar episódio de \"{}\": {e}", "Failed to save episode of \"{}\": {e}", watch.title)),
         }
     }
 
@@ -240,8 +240,8 @@ pub async fn poll_watch(app: &AppHandle, state: &AppState, watch: &db::watches::
             app,
             state,
             "notify_found",
-            "Novos episódios encontrados",
-            format!("{started} episódios de {base_title} — iniciando download"),
+            tr!("Novos episódios encontrados", "New episodes found"),
+            tr!("{started} episódios de {base_title} — iniciando download", "{started} episodes of {base_title} — starting download"),
             "info",
             watch.cover_url.clone(),
         )
@@ -260,7 +260,7 @@ pub async fn resume_pending_downloads(app: AppHandle) {
     for status in ["found", "downloading"] {
         match db::episodes::list_by_status(&state.db, status).await {
             Ok(mut eps) => pending.append(&mut eps),
-            Err(e) => state.activity.error(format!("Erro ao listar episódios pendentes: {e}")),
+            Err(e) => state.activity.error(tr!("Erro ao listar episódios pendentes: {e}", "Failed to list pending episodes: {e}")),
         }
     }
 
@@ -360,14 +360,14 @@ async fn sync_jellyfin_after_download(app: AppHandle, episode_id: i64, file_path
         Ok(Some(item_id)) => {
             let _ = db::episodes::set_jellyfin_item_id(&state.db, episode_id, &item_id).await;
             if let Ok(episode) = db::episodes::get(&state.db, episode_id).await {
-                let raw_title = episode.name.clone().unwrap_or_else(|| format!("episódio #{episode_id}"));
+                let raw_title = episode.name.clone().unwrap_or_else(|| tr!("episódio #{episode_id}", "episode #{episode_id}"));
                 if let Ok(watch) = db::watches::get(&state.db, episode.watch_id).await {
                     let clean_title = notify_episode_title(&watch.title, &raw_title);
                     notify::notify(
                         &app,
                         &state,
                         "notify_jellyfin",
-                        "Disponível no Jellyfin",
+                        tr!("Disponível no Jellyfin", "Available on Jellyfin"),
                         clean_title,
                         "success",
                         watch.cover_url,
@@ -377,7 +377,7 @@ async fn sync_jellyfin_after_download(app: AppHandle, episode_id: i64, file_path
             }
         }
         Ok(None) => {
-            state.activity.error("Jellyfin não achou o episódio depois do refresh".to_string());
+            state.activity.error(tr!("Jellyfin não achou o episódio depois do refresh", "Jellyfin didn't find the episode after the refresh"));
         }
         Err(e) => {
             state.activity.error(format!("Erro ao consultar Jellyfin: {e}"));
@@ -442,7 +442,7 @@ pub fn spawn_download_reconciler(app: AppHandle) {
                             continue;
                         };
                         if episode.status == "downloading" {
-                            let title = episode.name.clone().unwrap_or_else(|| format!("episódio #{episode_id}"));
+                            let title = episode.name.clone().unwrap_or_else(|| tr!("episódio #{episode_id}", "episode #{episode_id}"));
                             let watch = db::watches::get(&state.db, episode.watch_id).await.ok();
                             let cover_url = watch.as_ref().and_then(|w| w.cover_url.clone());
                             let clean_title = watch
@@ -451,15 +451,15 @@ pub fn spawn_download_reconciler(app: AppHandle) {
                                 .unwrap_or_else(|| title.clone());
                             let final_path = rename_to_clean_filename(&state, episode_id, episode.watch_id).await;
                             if let Err(e) = db::episodes::mark_available(&state.db, episode_id).await {
-                                state.activity.error(format!("Erro ao marcar episódio disponível: {e}"));
+                                state.activity.error(tr!("Erro ao marcar episódio disponível: {e}", "Failed to mark episode as available: {e}"));
                             } else {
-                                state.activity.info(format!("Download concluído: {clean_title}"));
+                                state.activity.info(tr!("Download concluído: {clean_title}", "Download complete: {clean_title}"));
                                 notify::notify(
                                     &app,
                                     &state,
                                     "notify_complete",
-                                    "Download concluído",
-                                    format!("{clean_title} já está pronto pra assistir"),
+                                    tr!("Download concluído", "Download complete"),
+                                    tr!("{clean_title} já está pronto pra assistir", "{clean_title} is ready to watch"),
                                     "success",
                                     cover_url,
                                 )
@@ -520,7 +520,7 @@ async fn remove_episode(
     if let Some(path) = &ep.item_path {
         if let Err(e) = tokio::fs::remove_file(path).await {
             if e.kind() != std::io::ErrorKind::NotFound {
-                state.activity.error(format!("Erro ao apagar arquivo de \"{clean_title}\": {e}"));
+                state.activity.error(tr!("Erro ao apagar arquivo de \"{clean_title}\": {e}", "Failed to delete file of \"{clean_title}\": {e}"));
                 return false;
             }
         }
@@ -528,7 +528,7 @@ async fn remove_episode(
 
     if let (Some((url, api_key)), Some(item_id)) = (jellyfin, &ep.jellyfin_item_id) {
         if let Err(e) = jellyfin::delete_item(&state.http, url, api_key, item_id).await {
-            state.activity.error(format!("Erro ao remover \"{clean_title}\" do Jellyfin: {e}"));
+            state.activity.error(tr!("Erro ao remover \"{clean_title}\" do Jellyfin: {e}", "Failed to remove \"{clean_title}\" from Jellyfin: {e}"));
         }
     }
 
@@ -601,13 +601,13 @@ pub async fn cleanup_once(state: &AppState, playing_path: Option<String>) {
             continue;
         }
 
-        let title = ep.name.clone().unwrap_or_else(|| format!("episódio #{}", ep.id));
+        let title = ep.name.clone().unwrap_or_else(|| tr!("episódio #{}", "episode #{}", ep.id));
         let clean_title = notify_episode_title(&watch.title, &title);
         if remove_episode(state, &ep, &clean_title, jellyfin).await {
             // Log interno só (aba de atividade) — sem notificação, de propósito.
             match expired_days {
-                Some(days) => state.activity.info(format!("Removido por retenção ({days}d): {clean_title}")),
-                None => state.activity.info(format!("Removido depois de assistido: {clean_title}")),
+                Some(days) => state.activity.info(tr!("Removido por retenção ({days}d): {clean_title}", "Removed by retention ({days}d): {clean_title}")),
+                None => state.activity.info(tr!("Removido depois de assistido: {clean_title}", "Removed after watching: {clean_title}")),
             }
         }
     }

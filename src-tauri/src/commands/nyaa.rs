@@ -6,15 +6,15 @@ pub async fn nyaa_search(
     state: State<'_, AppState>,
     query: String,
 ) -> Result<Vec<nyaa::NyaaCandidate>, AppError> {
-    state.activity.info(format!("Procurando episódios de \"{query}\"..."));
+    state.activity.info(tr!("Procurando episódios de \"{query}\"...", "Searching episodes of \"{query}\"..."));
     let result = nyaa::search(&state.http, &query).await;
     match &result {
         Ok(items) if items.is_empty() => {
-            state.activity.info(format!("Nada encontrado ainda pra \"{query}\""))
+            state.activity.info(tr!("Nada encontrado ainda pra \"{query}\"", "Nothing found yet for \"{query}\""))
         }
         Ok(items) => state
             .activity
-            .info(format!("Encontrado {} episódio(s) de \"{query}\"", items.len())),
+            .info(tr!("Encontrado {} episódio(s) de \"{query}\"", "Found {} episode(s) of \"{query}\"", items.len())),
         Err(e) => state.activity.error(format!("Falha ao procurar \"{query}\": {e}")),
     }
     result.map_err(AppError::Fetch)

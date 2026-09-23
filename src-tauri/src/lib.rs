@@ -1,3 +1,5 @@
+#[macro_use]
+mod i18n;
 mod activity;
 mod audio_strip;
 mod clean_filename;
@@ -147,6 +149,9 @@ pub fn run() {
                 db::settings::seed_defaults(&pool, &default_library_root.to_string_lossy())
                     .await
                     .expect("failed to seed default settings");
+                if let Ok(settings) = db::settings::get_all(&pool).await {
+                    i18n::apply_setting(settings.get("app_language").map(String::as_str).unwrap_or("auto"));
+                }
                 let torrent = torrent_engine::TorrentEngine::new(downloads_root)
                     .await
                     .expect("failed to start torrent engine");
@@ -169,9 +174,10 @@ pub fn run() {
             tauri::async_runtime::spawn(engine::resume_pending_downloads(app.handle().clone()));
             tauri::async_runtime::spawn(engine::resync_jellyfin_library(app.handle().clone()));
 
-            let open_i = MenuItem::with_id(app, "open", "Abrir", true, None::<&str>)?;
-            let quit_i = MenuItem::with_id(app, "quit", "Sair", true, None::<&str>)?;
+            let open_i = MenuItem::with_id(app, "open", tr!("Abrir", "Open"), true, None::<&str>)?;
+            let quit_i = MenuItem::with_id(app, "quit", tr!("Sair", "Quit"), true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open_i, &quit_i])?;
+            app.manage(i18n::TrayMenu { open: open_i.clone(), quit: quit_i.clone() });
 
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())

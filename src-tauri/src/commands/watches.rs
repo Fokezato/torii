@@ -56,7 +56,7 @@ pub async fn create_watch(
     if let Some(total) = created.episodes.filter(|n| *n > 0) {
         for ep in 1..=total {
             if let Err(e) = db::episodes::create_placeholder(&state.db, created.id, &created.folder, ep).await {
-                state.activity.error(format!("Erro ao criar placeholder do episódio {ep}: {e}"));
+                state.activity.error(tr!("Erro ao criar placeholder do episódio {ep}: {e}", "Failed to create placeholder for episode {ep}: {e}"));
             }
         }
     }

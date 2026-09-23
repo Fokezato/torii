@@ -1,57 +1,72 @@
-export const LANGUAGES = [
-  { value: "any", label: "(qualquer)" },
-  { value: "Japanese", label: "Japonês" },
-  { value: "English", label: "Inglês" },
-  { value: "Portuguese (Brazil)", label: "Português (Brasil)" },
-  { value: "Spanish (Latin America)", label: "Espanhol (LatAm)" },
-  { value: "Spanish (Spain)", label: "Espanhol (Espanha)" },
-  { value: "French", label: "Francês" },
-  { value: "German", label: "Alemão" },
-  { value: "Italian", label: "Italiano" },
-  { value: "Russian", label: "Russo" },
-  { value: "Arabic", label: "Árabe" },
-  { value: "Chinese (Simplified)", label: "Chinês (Simplificado)" },
-  { value: "Chinese (Traditional)", label: "Chinês (Tradicional)" },
-  { value: "Polish", label: "Polonês" },
-  { value: "Indonesian", label: "Indonésio" },
-  { value: "Malay", label: "Malaio" },
-  { value: "Thai", label: "Tailandês" },
-  { value: "Vietnamese", label: "Vietnamita" },
+import { t, tDynamic } from "@/i18n";
+
+// Valores canônicos (os mesmos gravados no banco e usados na busca do
+// Nyaa); o rótulo mostrado vem da tradução (`languages.*`).
+const LANGUAGE_VALUES = [
+  "any",
+  "Japanese",
+  "English",
+  "Portuguese (Brazil)",
+  "Spanish (Latin America)",
+  "Spanish (Spain)",
+  "French",
+  "German",
+  "Italian",
+  "Russian",
+  "Arabic",
+  "Chinese (Simplified)",
+  "Chinese (Traditional)",
+  "Polish",
+  "Indonesian",
+  "Malay",
+  "Thai",
+  "Vietnamese",
 ] as const;
 
-export const QUALITIES = [
-  { value: "any", label: "Qualquer" },
-  { value: "480p", label: "480p" },
-  { value: "720p", label: "720p" },
-  { value: "1080p", label: "1080p" },
-  { value: "2160p", label: "2160p" },
-] as const;
+export function languageLabel(value: string): string {
+  return tDynamic(`languages.${value}`, value);
+}
 
-export const STATUS_LABEL: Record<string, string> = {
-  FINISHED: "Finalizado",
-  RELEASING: "Em exibição",
-  NOT_YET_RELEASED: "Anunciado",
-  CANCELLED: "Cancelado",
-  HIATUS: "Em hiato",
-};
+export function languageOptions(): { value: string; label: string }[] {
+  return LANGUAGE_VALUES.map((value) => ({ value, label: languageLabel(value) }));
+}
 
-export const SEASON_LABEL: Record<string, string> = {
-  WINTER: "Inverno",
-  SPRING: "Primavera",
-  SUMMER: "Verão",
-  FALL: "Outono",
-};
+export function qualityOptions(): { value: string; label: string }[] {
+  return [
+    { value: "any", label: t("quality.any") },
+    { value: "480p", label: "480p" },
+    { value: "720p", label: "720p" },
+    { value: "1080p", label: "1080p" },
+    { value: "2160p", label: "2160p" },
+  ];
+}
 
-export const LIST_STATUS_LABEL: Record<string, string> = {
-  watching: "Assistindo",
-  downloaded: "Baixado",
-  completed: "Concluído",
-  planning: "Quero assistir",
-};
+export function qualityLabel(value: string): string {
+  return qualityOptions().find((q) => q.value === value)?.label ?? value;
+}
 
-export const LIST_STATUS_OPTIONS = [
-  { value: "watching", label: "Assistindo" },
-  { value: "downloaded", label: "Baixado" },
-  { value: "completed", label: "Concluído" },
-  { value: "planning", label: "Quero assistir" },
-] as const;
+/// Status de exibição na AniList (FINISHED, RELEASING...).
+export function statusLabel(status: string): string {
+  return tDynamic(`animeStatus.${status}`, status);
+}
+
+/// Estação do ano da AniList (WINTER, SPRING...).
+export function seasonLabel(season: string): string {
+  return tDynamic(`seasons.${season}`, season);
+}
+
+/// Status do episódio no banco (pending, downloading, available...).
+export function episodeStatusLabel(status: string): string {
+  return tDynamic(`episodeStatus.${status}`, status);
+}
+
+const LIST_STATUS_VALUES = ["watching", "downloaded", "completed", "planning"] as const;
+
+/// Status do anime na lista do usuário (Assistindo, Baixado...).
+export function listStatusLabel(status: string): string {
+  return tDynamic(`listStatus.${status}`, status);
+}
+
+export function listStatusOptions(): { value: string; label: string }[] {
+  return LIST_STATUS_VALUES.map((value) => ({ value, label: listStatusLabel(value) }));
+}

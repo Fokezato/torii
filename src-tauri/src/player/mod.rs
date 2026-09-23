@@ -159,7 +159,7 @@ impl PlayerEngine {
             }
         };
         if media.is_null() {
-            return Err(format!("libvlc não conseguiu abrir mídia: {source}"));
+            return Err(tr!("libvlc não conseguiu abrir mídia: {source}", "libvlc couldn't open the media: {source}"));
         }
         if let Some(ms) = start_ms.filter(|ms| *ms > 0) {
             let option = CString::new(format!(":start-time={:.3}", ms as f64 / 1000.0)).map_err(|e| e.to_string())?;

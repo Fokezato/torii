@@ -53,11 +53,11 @@ pub fn probe(ffprobe: &Path, file: &Path) -> Result<Probe, String> {
         .args(["-show_entries", "format=duration", "-of", "json"])
         .arg(file)
         .output()
-        .map_err(|e| format!("ffprobe não rodou: {e}"))?;
+        .map_err(|e| tr!("ffprobe não rodou: {e}", "ffprobe failed to run: {e}"))?;
     if !out.status.success() {
         return Err(format!("ffprobe falhou: {}", String::from_utf8_lossy(&out.stderr).trim()));
     }
-    serde_json::from_slice(&out.stdout).map_err(|e| format!("saída do ffprobe inválida: {e}"))
+    serde_json::from_slice(&out.stdout).map_err(|e| tr!("saída do ffprobe inválida: {e}", "invalid ffprobe output: {e}"))
 }
 
 /// Resultado de uma operação num arquivo.
@@ -91,7 +91,7 @@ pub fn run_and_replace(
     original: &Probe,
 ) -> Result<Outcome, ProcessError> {
     let tmp = temp_path(file);
-    let out = cmd.output().map_err(|e| ProcessError::Permanent(format!("ffmpeg não rodou: {e}")))?;
+    let out = cmd.output().map_err(|e| ProcessError::Permanent(tr!("ffmpeg não rodou: {e}", "ffmpeg failed to run: {e}")))?;
     if !out.status.success() {
         let _ = std::fs::remove_file(&tmp);
         let stderr = String::from_utf8_lossy(&out.stderr);
@@ -105,7 +105,7 @@ pub fn run_and_replace(
     };
     if !ok {
         let _ = std::fs::remove_file(&tmp);
-        return Err(ProcessError::Permanent("arquivo gerado não confere com o original".to_string()));
+        return Err(ProcessError::Permanent(tr!("arquivo gerado não confere com o original", "output file doesn't match the original")));
     }
 
     let before = std::fs::metadata(file).map(|m| m.len()).unwrap_or(0);
