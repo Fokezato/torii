@@ -93,6 +93,11 @@ const DEFAULT_SKIP_SETTINGS: SkipSettings = {
 const NEXT_AFTER_ENDING_MAX_TAIL_MS = 150_000;
 const PROGRESS_SAVE_MS = 10_000;
 
+/// Trecho "misto" (créditos por cima de cenas): nunca pula sozinho.
+function isMixed(s: SkipSegments, kind: SegmentKind): boolean {
+  return (kind === "intro" && s.intro_mixed) || (kind === "ending" && s.ending_mixed);
+}
+
 function segmentRange(s: SkipSegments, kind: SegmentKind): [number, number] | null {
   const start = s[`${kind}_start_ms`];
   const end = s[`${kind}_end_ms`];
@@ -117,6 +122,25 @@ function openEpisode(ep: Episode, watchId: number, watch: Watch | null): Promise
     ? formatPlayerTitle(watch.title, rawLabel, watch.series_title)
     : { title: "", episodeLabel: rawLabel };
   return playerOpen(source, title, episodeLabel, watchId, episodeNumberOf(ep));
+}
+
+// Trecho que termina a menos disso do fim do arquivo = "até o fim": pular
+// pro fim não funciona (o libvlc não consegue ir exatamente pro último
+// quadro, volta pra dentro do trecho e o botão reaparece em loop).
+const END_OF_FILE_SLACK_MS = 2_000;
+
+/// Pula o trecho: seek pro fim dele, ou — se ele vai até o fim do arquivo —
+/// abre o próximo episódio baixado (sem próximo, sai do player).
+function skipSegment(snap: PlayerSnapshot, endMs: number, seek: (ms: number) => void) {
+  if (snap.duration_ms > 0 && endMs >= snap.duration_ms - END_OF_FILE_SLACK_MS) {
+    openNextEpisode(snap)
+      .then((opened) => {
+        if (!opened) emit("player:back-requested");
+      })
+      .catch(() => {});
+    return;
+  }
+  seek(endMs);
 }
 
 /// Próximo episódio JÁ BAIXADO do mesmo anime. `false` se não tiver.
@@ -296,12 +320,13 @@ export default function PlayerOverlay() {
               if (
                 range &&
                 skipSettings.auto[kind] &&
+                !isMixed(skipSegments, kind) &&
                 !autoSkippedRef.current[kind] &&
                 snap.position_ms >= range[0] &&
                 snap.position_ms < range[1]
               ) {
                 autoSkippedRef.current[kind] = true;
-                playerSeek(range[1]).catch(() => {});
+                skipSegment(snap, range[1], (ms) => playerSeek(ms).catch(() => {}));
               }
             }
 
@@ -309,7 +334,13 @@ export default function PlayerOverlay() {
             // próximo / créditos), vai direto pro próximo episódio. Trecho
             // longo depois do ED costuma ser história — aí não pula.
             const ending = segmentRange(skipSegments, "ending");
-            if (skipSettings.nextAfterEnding && ending && !nextTriggeredRef.current && snap.duration_ms > 0) {
+            if (
+              skipSettings.nextAfterEnding &&
+              ending &&
+              !skipSegments.ending_mixed &&
+              !nextTriggeredRef.current &&
+              snap.duration_ms > 0
+            ) {
               const tail = snap.duration_ms - ending[1];
               if (tail > 0 && tail <= NEXT_AFTER_ENDING_MAX_TAIL_MS && snap.position_ms >= ending[1] - 300) {
                 nextTriggeredRef.current = true;
@@ -394,7 +425,8 @@ export default function PlayerOverlay() {
       if (skipSettings.mark[kind]) {
         segmentMarks.push({ startPct: toPct(range[0]), endPct: toPct(range[1]), label: t(`player.segment.${kind}`) });
       }
-      if (!skipSettings.auto[kind] && positionMs >= range[0] && positionMs < range[1]) {
+      const autoSkips = skipSettings.auto[kind] && !isMixed(skipSegments, kind);
+      if (!autoSkips && positionMs >= range[0] && positionMs < range[1]) {
         activeSkip = { label: t(`player.skip.${kind}`), endMs: range[1] };
       }
     }
@@ -538,7 +570,7 @@ export default function PlayerOverlay() {
           type="button"
           onClick={(e) => {
             e.stopPropagation();
-            seekTo(activeSkip.endMs);
+            if (snapshot) skipSegment(snapshot, activeSkip.endMs, seekTo);
           }}
           className="absolute right-6 bottom-24 z-10 rounded-lg border border-white/20 bg-black/60 px-4 py-2.5 text-sm font-semibold text-white backdrop-blur-sm transition-colors hover:bg-black/80"
         >

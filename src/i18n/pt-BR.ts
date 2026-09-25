@@ -397,7 +397,12 @@ const ptBR = {
         "Pula a prévia/créditos que vêm depois do encerramento e abre o próximo episódio baixado",
       markGroup: "Marcar na barra do tempo",
       markHint: "Destaca o trecho em amarelo na barra do player",
-      aniskipNote: "Os trechos vêm do AniSkip, uma base colaborativa. Nem todo episódio tem.",
+      aniskipNote:
+        "Os trechos vêm do AniSkip (base colaborativa), dos capítulos do arquivo e da detecção pelo áudio. Créditos passando por cima de cenas nunca são pulados sozinhos.",
+      detectGroup: "Detecção de abertura e encerramento",
+      detect: "Detectar pelo áudio",
+      detectHint:
+        "Quando o AniSkip não tem os tempos, o Torii compara o áudio dos episódios baixados da mesma temporada pra achar a abertura e o encerramento. Roda em segundo plano e usa o ffmpeg (~80MB, baixado na primeira vez).",
       preferredGroup: "Idioma preferido do player",
       audio: "Áudio",
       audioHint:

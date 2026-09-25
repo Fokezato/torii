@@ -77,7 +77,7 @@ pub async fn fetch_skip_times(
     episode_number: i64,
 ) -> Result<SkipSegments, String> {
     let url = format!(
-        "https://api.aniskip.com/v2/skip-times/{mal_id}/{episode_number}?types[]=op&types[]=ed&types[]=recap&episodeLength=0"
+        "https://api.aniskip.com/v2/skip-times/{mal_id}/{episode_number}?types[]=op&types[]=ed&types[]=recap&types[]=mixed-op&types[]=mixed-ed&episodeLength=0"
     );
     let resp = client.get(&url).send().await.map_err(|e| e.to_string())?;
     if resp.status() == reqwest::StatusCode::NOT_FOUND {
@@ -96,10 +96,23 @@ pub async fn fetch_skip_times(
                 "op" => {
                     segments.intro_start_ms = Some(start_ms);
                     segments.intro_end_ms = Some(end_ms);
+                    segments.intro_mixed = false;
                 }
                 "ed" => {
                     segments.ending_start_ms = Some(start_ms);
                     segments.ending_end_ms = Some(end_ms);
+                    segments.ending_mixed = false;
+                }
+                // Misto só entra se não tiver o normal do mesmo tipo.
+                "mixed-op" if segments.intro_start_ms.is_none() => {
+                    segments.intro_start_ms = Some(start_ms);
+                    segments.intro_end_ms = Some(end_ms);
+                    segments.intro_mixed = true;
+                }
+                "mixed-ed" if segments.ending_start_ms.is_none() => {
+                    segments.ending_start_ms = Some(start_ms);
+                    segments.ending_end_ms = Some(end_ms);
+                    segments.ending_mixed = true;
                 }
                 "recap" => {
                     segments.recap_start_ms = Some(start_ms);

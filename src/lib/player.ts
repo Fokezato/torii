@@ -44,7 +44,8 @@ export async function mediaFrame(path: string, timeMs: number): Promise<string> 
 }
 
 /** Trechos de abertura/encerramento em ms — `null` num campo = esse trecho
- * não existe/não foi achado pela AniSkip (ver `playerGetSkipSegments`). */
+ * não existe/não foi achado (AniSkip, capítulos do arquivo ou detecção pelo
+ * áudio, ver `playerGetSkipSegments`). */
 export interface SkipSegments {
   intro_start_ms: number | null;
   intro_end_ms: number | null;
@@ -53,6 +54,9 @@ export interface SkipSegments {
   /** Resumo do episódio anterior. */
   recap_start_ms: number | null;
   recap_end_ms: number | null;
+  /** Créditos por cima de cenas do episódio: mostra o botão, não pula sozinho. */
+  intro_mixed: boolean;
+  ending_mixed: boolean;
 }
 
 export interface TrackInfo {

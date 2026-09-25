@@ -14,6 +14,9 @@ pub async fn update_settings(
     values: HashMap<String, String>,
 ) -> Result<(), AppError> {
     db::settings::update(&state.db, &values).await?;
+    if values.get("detect_segments").map(String::as_str) == Some("1") {
+        crate::intro_detect::spawn_pending(&app);
+    }
     if let Some(language) = values.get("app_language") {
         i18n::apply_setting(language);
         if let Some(tray) = app.try_state::<i18n::TrayMenu>() {

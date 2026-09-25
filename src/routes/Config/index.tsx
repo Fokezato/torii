@@ -561,6 +561,18 @@ export default function Config() {
                     ))}
                   </SettingsGroup>
 
+                  <SettingsGroup title={t("config.playback.detectGroup")}>
+                    <SettingRow
+                      label={t("config.playback.detect")}
+                      description={t("config.playback.detectHint")}
+                    >
+                      <Switch
+                        checked={s.detect_segments !== "0"}
+                        onCheckedChange={(checked) => patch.mutate({ detect_segments: checked ? "1" : "0" })}
+                      />
+                    </SettingRow>
+                  </SettingsGroup>
+
                   <SettingsGroup title={t("config.playback.markGroup")}>
                     {[
                       { key: "player_mark_recap", label: t("player.segment.recap") },

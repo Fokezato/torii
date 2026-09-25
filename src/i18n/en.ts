@@ -394,7 +394,12 @@ const en: Translation = {
       nextAfterEndingHint: "Skips the preview/credits after the ending and opens the next downloaded episode",
       markGroup: "Mark on the timeline",
       markHint: "Highlights the segment in yellow on the player bar",
-      aniskipNote: "Segments come from AniSkip, a community database. Not every episode has them.",
+      aniskipNote:
+        "Segments come from AniSkip (a community database), the file's chapters and audio detection. Credits playing over scenes are never skipped automatically.",
+      detectGroup: "Opening and ending detection",
+      detect: "Detect from audio",
+      detectHint:
+        "When AniSkip has no times, Torii compares the audio of downloaded episodes from the same season to find the opening and ending. Runs in the background and uses ffmpeg (~80MB, downloaded the first time).",
       preferredGroup: "Preferred player languages",
       audio: "Audio",
       audioHint:
