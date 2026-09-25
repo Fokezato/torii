@@ -120,25 +120,6 @@ pub async fn switch_episode_source(
     episode_id: i64,
     source_item_id: String,
 ) -> Result<(), AppError> {
-    let source = db::episode_sources::get(&state.db, episode_id, &source_item_id).await?;
-    let _ = state.torrent.remove(episode_id, true).await;
-    db::episodes::switch_source(&state.db, episode_id, &source.source_item_id, &source.title, &source.magnet_uri)
-        .await?;
-    db::episode_sources::set_active(&state.db, episode_id, &source_item_id).await?;
-
-    let episode = db::episodes::get(&state.db, episode_id).await?;
-    let watch = db::watches::get(&state.db, episode.watch_id).await?;
-    engine::start_download(
-        &app,
-        &state,
-        episode_id,
-        &watch.title,
-        &source.title,
-        &source.magnet_uri,
-        &watch.folder,
-        watch.cover_url,
-        true,
-    )
-    .await;
+    engine::switch_source(&app, &state, episode_id, &source_item_id).await?;
     Ok(())
 }

@@ -300,16 +300,39 @@ fn extract_language_line(description: &str, label_pattern: &str) -> Option<Strin
     // negrito e adicionam a contagem entre parênteses antes do ":"
     // ("`Subtitles (15):`", "`Audios (2):`") — "s?\s*(?:\(\d+\))?" cobre o
     // plural + contagem, e a classe de caractere aceita "`" além de "*".
+    //
+    // Só espaço/tab entre o label e o valor: `\s` atravessava a quebra de
+    // linha e, no formato em bloco (título sozinho e uma faixa por linha,
+    // comum em releases estilo MediaInfo), pegava só a 1ª faixa da lista.
     let re = Regex::new(&format!(
-        r"(?im)^(?:[-*]\s+)?[`*]{{0,2}}{label_pattern}s?\s*(?:\(\d+\))?[`*]{{0,2}}:?\s*(.+)$"
+        r"(?im)^(?:[-*][ \t]+)?[`*]{{0,2}}{label_pattern}s?[ \t]*(?:\(\d+\))?[`*]{{0,2}}:?[ \t]*(.*)$"
     ))
     .ok()?;
+    let caps = re.captures(description)?;
+    let inline = caps[1].trim();
+    let value = if !inline.is_empty() {
+        inline.to_string()
+    } else {
+        // Formato em bloco: "**Subtitles**" e as faixas nas linhas de baixo,
+        // até a próxima linha em branco ou o próximo título.
+        let rest = &description[caps.get(0)?.end()..];
+        rest.lines()
+            .skip_while(|l| l.trim().is_empty())
+            .take_while(|l| {
+                let l = l.trim();
+                !l.is_empty() && !l.starts_with("**") && !l.starts_with('#')
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    if value.is_empty() {
+        return None;
+    }
     // Cada idioma da lista também costuma vir em negrito ("**Portuguese**
     // (Brazilian), ASS") — sem tirar os "**" daqui, o "**" entre o nome e o
     // "(Brazilian)" quebra o match de substring contra "portuguese (brazil)"
     // em `matches_language_text`, mesmo o idioma estando ali de verdade.
-    re.captures(description)
-        .map(|c| c[1].trim().replace('*', ""))
+    Some(value.replace('*', ""))
 }
 
 /// Uploaders no estilo MediaInfo (VARYG, EMBER, etc.) descrevem o idioma com
@@ -812,6 +835,21 @@ mod tests {
         assert_eq!(audio, "Japanese");
         let subs = extract_language_line(description, "Subtitles?:?").unwrap();
         assert_eq!(subs, "English, Portuguese (Brazil)");
+    }
+
+    #[test]
+    fn language_line_extraction_reads_block_lists() {
+        // Formato em bloco: título sozinho e
+        // uma faixa por linha.
+        let description = "**Audio**\nJapanese / E-AC-3 / 2.0\nEnglish / E-AC-3 / 2.0\n\n\
+            **Subtitles**\nEnglish / Full / Default / ASS\nPortuguese (Brazil) / Full / Default / ASS / CR\n\n\
+            **Chapters**\nPrologue / Opening / Part A";
+        let subs = extract_language_line(description, "Subtitles?:?").unwrap();
+        assert!(subs.contains("Portuguese (Brazil)"));
+        assert!(!subs.contains("Prologue"));
+        let audio = extract_language_line(description, "Audio:?").unwrap();
+        assert!(audio.contains("English") && !audio.contains("Portuguese"));
+        assert!(matches_language_text(description, &[], &["Portuguese (Brazil)".to_string()]));
     }
 
     #[test]

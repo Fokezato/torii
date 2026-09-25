@@ -227,6 +227,11 @@ pub async fn poll_watch(app: &AppHandle, state: &AppState, watch: &db::watches::
                 .await;
                 started += 1;
             }
+            Ok(episode) if episode.status == "downloading" => {
+                let candidates: Vec<&nyaa::NyaaCandidate> =
+                    std::iter::once(candidate).chain(episode_match.alternates.iter()).collect();
+                let _ = db::episode_sources::add_alternates(&state.db, episode.id, &candidates).await;
+            }
             Ok(_) => {}
             Err(e) => state
                 .activity
@@ -407,12 +412,106 @@ pub async fn resync_jellyfin_library(app: AppHandle) {
 
 /// Consulta o progresso de todo torrent rastreado a cada tick, emite pro
 /// front via evento, e persiste quando um episódio termina de baixar.
+/// Cancela o torrent atual do episódio (apagando o parcial) e recomeça pela
+/// fonte `source_item_id`, que tem que estar em `episode_sources`.
+pub async fn switch_source(
+    app: &AppHandle,
+    state: &AppState,
+    episode_id: i64,
+    source_item_id: &str,
+) -> Result<(), crate::error::AppError> {
+    let source = db::episode_sources::get(&state.db, episode_id, source_item_id).await?;
+    let _ = state.torrent.remove(episode_id, true).await;
+    db::episodes::switch_source(&state.db, episode_id, &source.source_item_id, &source.title, &source.magnet_uri)
+        .await?;
+    db::episode_sources::set_active(&state.db, episode_id, source_item_id).await?;
+
+    let episode = db::episodes::get(&state.db, episode_id).await?;
+    let watch = db::watches::get(&state.db, episode.watch_id).await?;
+    start_download(
+        app,
+        state,
+        episode_id,
+        &watch.title,
+        &source.title,
+        &source.magnet_uri,
+        &watch.folder,
+        watch.cover_url,
+        true,
+    )
+    .await;
+    Ok(())
+}
+
+/// Tempo sem receber nenhum byte pra considerar o download travado. A
+/// contagem de seeds do Nyaa costuma estar desatualizada: torrent "com 11
+/// seeds" que ninguém mais semeia de verdade (confirmado no qBittorrent).
+const STALL_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+
+/// Progresso visto por episódio: (bytes, quando mudou pela última vez).
+type StallTracker = std::collections::HashMap<i64, (u64, std::time::Instant)>;
+
+/// Download travado → troca pra melhor fonte alternativa ainda não tentada.
+/// `tried` guarda as fontes já usadas nesta sessão pra não ficar em ciclo.
+async fn handle_stalled(
+    app: &AppHandle,
+    state: &AppState,
+    episode_id: i64,
+    tried: &mut std::collections::HashMap<i64, std::collections::HashSet<String>>,
+) {
+    let Ok(sources) = db::episode_sources::list(&state.db, episode_id).await else {
+        return;
+    };
+    let tried_here = tried.entry(episode_id).or_default();
+    for s in sources.iter().filter(|s| s.is_active == 1) {
+        tried_here.insert(s.source_item_id.clone());
+    }
+    // `list` já vem ordenado por seeds (maior primeiro).
+    let Some(next) = sources.iter().find(|s| !tried_here.contains(&s.source_item_id)) else {
+        return;
+    };
+    tried_here.insert(next.source_item_id.clone());
+    let name = db::episodes::get(&state.db, episode_id)
+        .await
+        .ok()
+        .and_then(|e| e.name)
+        .unwrap_or_else(|| tr!("episódio #{episode_id}", "episode #{episode_id}"));
+    state.activity.info(tr!(
+        "Download parado há 10 min, trocando de fonte: {name}",
+        "Download stalled for 10 min, switching source: {name}"
+    ));
+    if let Err(e) = switch_source(app, state, episode_id, &next.source_item_id).await {
+        state.activity.error(tr!("Erro ao trocar de fonte: {e}", "Failed to switch source: {e}"));
+    }
+}
+
 pub fn spawn_download_reconciler(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
+        let mut stall: StallTracker = StallTracker::new();
+        let mut tried = std::collections::HashMap::new();
         loop {
             {
                 let state = app.state::<AppState>();
                 let snapshot = state.torrent.snapshot().await;
+
+                // Travado = rodando (não pausado/terminado) e sem byte novo
+                // há STALL_TIMEOUT. Pausa manual zera a contagem.
+                let now = std::time::Instant::now();
+                let mut stalled = Vec::new();
+                stall.retain(|id, _| snapshot.iter().any(|(e, _)| e == id));
+                for (episode_id, stats) in &snapshot {
+                    let running = !stats.finished && stats.state.to_string() == "live";
+                    let entry = stall.entry(*episode_id).or_insert((stats.progress_bytes, now));
+                    if !running || stats.progress_bytes != entry.0 {
+                        *entry = (stats.progress_bytes, now);
+                    } else if now.duration_since(entry.1) >= STALL_TIMEOUT {
+                        stalled.push(*episode_id);
+                        *entry = (stats.progress_bytes, now);
+                    }
+                }
+                for episode_id in stalled {
+                    handle_stalled(&app, &state, episode_id, &mut tried).await;
+                }
 
                 let payload: Vec<serde_json::Value> = snapshot
                     .iter()
