@@ -187,7 +187,26 @@ pub async fn player_save_progress(
 /// `db::watches::set_mal_id`), pra não repetir chamada de rede depois.
 #[tauri::command]
 pub async fn player_get_skip_segments(
+    app: AppHandle,
     app_state: State<'_, AppState>,
+    watch_id: i64,
+    episode_number: i64,
+) -> Result<SkipSegments, AppError> {
+    let mut segments = aniskip_segments(&app_state, watch_id, episode_number).await?;
+    if !segments.is_complete() {
+        match crate::db::skip_segments::get_detected(&app_state.db, watch_id, episode_number).await? {
+            Some(detected) => segments.fill_from(&detected),
+            // Ainda não analisado: roda a detecção em segundo plano (vale
+            // pro próximo episódio / próxima vez que abrir).
+            None => crate::intro_detect::spawn_pending(&app),
+        }
+    }
+    Ok(segments)
+}
+
+/// Trechos do AniSkip, com cache no banco.
+async fn aniskip_segments(
+    app_state: &AppState,
     watch_id: i64,
     episode_number: i64,
 ) -> Result<SkipSegments, AppError> {

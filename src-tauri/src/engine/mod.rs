@@ -564,6 +564,7 @@ pub fn spawn_download_reconciler(app: AppHandle) {
                                 )
                                 .await;
                             }
+                            crate::intro_detect::spawn_pending(&app);
                             if let Some(path) = final_path {
                                 tauri::async_runtime::spawn(sync_jellyfin_after_download(
                                     app.clone(),

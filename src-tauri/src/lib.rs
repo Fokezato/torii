@@ -9,6 +9,7 @@ mod downscale;
 mod engine;
 mod error;
 mod ffmpeg;
+mod intro_detect;
 mod media_file;
 mod postprocess;
 mod jellyfin;
@@ -174,6 +175,15 @@ pub fn run() {
             engine::spawn_download_reconciler(app.handle().clone());
             tauri::async_runtime::spawn(engine::resume_pending_downloads(app.handle().clone()));
             tauri::async_runtime::spawn(engine::resync_jellyfin_library(app.handle().clone()));
+            // Detecção de abertura/encerramento dos episódios já baixados —
+            // espera o boot assentar antes de ocupar disco/CPU.
+            {
+                let app = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                    intro_detect::spawn_pending(&app);
+                });
+            }
 
             let open_i = MenuItem::with_id(app, "open", tr!("Abrir", "Open"), true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", tr!("Sair", "Quit"), true, None::<&str>)?;

@@ -30,6 +30,7 @@ chrono = "0.4"
 feed-rs = "2"
 scraper = "0.20"
 regex = "1"
+rustfft = "6"
 futures = "0.3"
 quick-xml = { version = "0.36", features = ["serialize"] }
 urlencoding = "2"
