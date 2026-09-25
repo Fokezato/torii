@@ -33,6 +33,21 @@ pub async fn add_many(
     Ok(())
 }
 
+/// Candidatos achados depois que o episódio já começou a baixar: entram
+/// como alternativas (não ativas) pra "trocar fonte" e pro detector de
+/// download travado poderem usar.
+pub async fn add_alternates(
+    pool: &SqlitePool,
+    episode_id: i64,
+    candidates: &[&NyaaCandidate],
+) -> Result<(), sqlx::Error> {
+    let now = chrono::Utc::now().to_rfc3339();
+    for candidate in candidates {
+        insert_one(pool, episode_id, candidate, false, &now).await?;
+    }
+    Ok(())
+}
+
 async fn insert_one(
     pool: &SqlitePool,
     episode_id: i64,
