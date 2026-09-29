@@ -52,6 +52,24 @@ jobs:
         run: npx tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}'
         shell: bash
 
+      # A libwayland do Ubuntu 22.04 embutida no AppImage quebra o WebKit em
+      # distros com Mesa mais novo (EGL_BAD_PARAMETER, janela em branco —
+      # visto no Bazzite). A do sistema é compatível: tira e remonta.
+      - name: Drop bundled libwayland from the AppImage
+        if: matrix.name == 'linux'
+        working-directory: src-tauri/target/release/bundle/appimage
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: 1
+        run: |
+          f=$(ls *.AppImage)
+          ./"$f" --appimage-extract > /dev/null
+          rm -f squashfs-root/usr/lib/libwayland-*
+          curl -sSL -o appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool
+          rm "$f"
+          ARCH=x86_64 ./appimagetool squashfs-root "$f"
+          rm -rf squashfs-root appimagetool
+
       - uses: actions/upload-artifact@v4
         with:
           name: torii-${{ matrix.name }}
