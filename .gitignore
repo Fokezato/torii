@@ -22,3 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Chaves (a de atualização mora fora do repo, em ~/.tauri)
+*.key
+*.key.pub

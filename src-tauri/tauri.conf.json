@@ -38,6 +38,18 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc1NzdFREE2NTJDNkNGQUMKUldTc3o4WlNwdTEzZFZRL0tCT09GSHZxeWFrbEJRKy8yMXV2UExpS1JIU0VRWHd5Rk9ibCt4am4K",
+      "endpoints": [
+        "https://github.com/Fokezato/torii/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

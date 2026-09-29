@@ -1,4 +1,5 @@
 import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { UpdateBanner } from "@/components/layout/UpdateBanner";
 import { useTranslation } from "react-i18next";
 import { Download, Home as HomeIcon, Library, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -97,6 +98,7 @@ export function AppShell() {
               nada, só dá uma base de altura real pra quem quiser usar. */}
           <div className="flex h-full flex-col gap-9">
             <Outlet />
+            <UpdateBanner />
           </div>
         </main>
       </div>
