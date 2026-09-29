@@ -5,6 +5,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   Check,
   ChevronLeft,
+  Download,
   ExternalLink,
   ListVideo,
   MoreVertical,
@@ -20,11 +21,13 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { RemoveWatchDialog } from "@/components/library/RemoveWatchDialog";
 import { WatchPreferencesDialog } from "@/components/library/WatchPreferencesDialog";
 import { getAnimeById, getAnimeSeasons, seasonTabLabel, type AnimeSummary } from "@/lib/anilist";
 import { WatchFormModal } from "@/components/anime/WatchFormModal";
 import { findContinueEpisode, playEpisode } from "@/lib/continueWatching";
 import {
+  downloadMissingEpisodes,
   forceCheckEpisode,
   listEpisodeSources,
   listWatchEpisodes,
@@ -34,8 +37,8 @@ import {
 import { notify } from "@/lib/notify";
 import { parseEpisodeLabel, parseEpisodeNumber, parseSeasonFromTitle } from "@/lib/episodeName";
 import {
-  deleteWatch,
   listWatches,
+  type RemoveMode,
   seriesKeyOf,
   seriesTitleOf,
   setWatchActive,
@@ -135,13 +138,19 @@ export default function LibraryDetail() {
     mutationFn: (rating: number) => setWatchRating(watch!.id, rating),
     onSuccess: invalidate,
   });
-  const remove = useMutation({
-    mutationFn: () => deleteWatch(watch!.id),
+  const [removeOpen, setRemoveOpen] = useState(false);
+  const downloadMissing = useMutation({
+    mutationFn: () => downloadMissingEpisodes(watch!.id),
     onSuccess: () => {
-      invalidate();
-      navigate("/library");
+      // Buscas rodam em segundo plano — atualiza a lista quando começarem.
+      setTimeout(() => queryClient.invalidateQueries({ queryKey: ["watch-episodes"] }), 4000);
     },
   });
+  function onRemoved(mode: RemoveMode) {
+    invalidate();
+    queryClient.invalidateQueries({ queryKey: ["watch-episodes"] });
+    if (mode !== "files_only") navigate("/library");
+  }
 
   if (watchesLoading) {
     return <p className="text-sm text-muted-foreground">{t("common.loading")}</p>;
@@ -176,6 +185,7 @@ export default function LibraryDetail() {
     .filter((e) => e.status === "available")
     .slice()
     .sort((a, b) => (b.episode_number ?? parseEpisodeNumber(b.name) ?? 0) - (a.episode_number ?? parseEpisodeNumber(a.name) ?? 0))[0];
+  const downloadingAny = episodeList.some((e) => e.status === "downloading" || e.status === "found");
 
   function selectSeason(seasonWatch: Watch) {
     setSelectedId(seasonWatch.id);
@@ -237,19 +247,31 @@ export default function LibraryDetail() {
             </Select>
           </div>
           <div className="flex shrink-0 items-center gap-2.5">
-            <button
-              type="button"
-              disabled={!latestAvailable}
-              onClick={async () => {
-                // Continua de onde parou nessa temporada, no player do Torii.
-                const target = await findContinueEpisode([watch]).catch(() => null);
-                if (target) await playEpisode(target.watch, target.episode, navigate);
-              }}
-              className="flex items-center gap-2 rounded-[10px] bg-primary px-4.5 py-2.5 text-[13px] font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
-            >
-              <Play className="size-3.5" fill="currentColor" />
-              {t("detail.play")}
-            </button>
+            {latestAvailable || watch.streaming ? (
+              <button
+                type="button"
+                onClick={async () => {
+                  // Continua de onde parou nessa temporada, no player do Torii.
+                  const target = await findContinueEpisode([watch]).catch(() => null);
+                  if (target) await playEpisode(target.watch, target.episode, navigate);
+                }}
+                className="flex items-center gap-2 rounded-[10px] bg-primary px-4.5 py-2.5 text-[13px] font-semibold text-primary-foreground transition-opacity hover:opacity-90"
+              >
+                <Play className="size-3.5" fill="currentColor" />
+                {t("detail.play")}
+              </button>
+            ) : (
+              // Nada baixado nessa temporada: busca e baixa tudo que falta.
+              <button
+                type="button"
+                disabled={downloadingAny || downloadMissing.isPending}
+                onClick={() => downloadMissing.mutate()}
+                className="flex items-center gap-2 rounded-[10px] bg-primary px-4.5 py-2.5 text-[13px] font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
+              >
+                <Download className="size-3.5" />
+                {downloadingAny || downloadMissing.isPending ? t("detail.downloadingAll") : t("detail.downloadAll")}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setPrefsOpen(true)}
@@ -260,7 +282,7 @@ export default function LibraryDetail() {
             </button>
             <button
               type="button"
-              onClick={() => remove.mutate()}
+              onClick={() => setRemoveOpen(true)}
               className="flex items-center gap-2 rounded-[10px] border border-[#3A2A30] px-3.5 py-2.5 text-[13px] font-semibold text-[#B5576B] transition-colors hover:bg-[#B5576B]/10"
             >
               <Trash2 className="size-3.5" />
@@ -379,14 +401,13 @@ export default function LibraryDetail() {
               : t("detail.downloaded", { count: downloadedCount })}
           </span>
         </div>
-        {episodeList.filter((e) => e.status !== "deleted").length === 0 ? (
+        {episodeList.length === 0 ? (
           <div className="rounded-xl border border-dashed border-[#23262F] p-6 text-center text-xs text-[#6C7180]">
             {t("detail.noEpisodes")}
           </div>
         ) : (
           <div className="flex flex-col gap-2">
             {episodeList
-              .filter((e) => e.status !== "deleted")
               .slice()
               .sort(
                 (a, b) =>
@@ -401,6 +422,7 @@ export default function LibraryDetail() {
       </div>
 
       <WatchPreferencesDialog watch={prefsOpen ? watch : null} onOpenChange={setPrefsOpen} />
+      <RemoveWatchDialog watch={removeOpen ? watch : null} onOpenChange={setRemoveOpen} onDone={onRemoved} />
       <WatchFormModal anime={addSeason} onOpenChange={(open) => !open && setAddSeason(null)} />
     </div>
   );
@@ -409,13 +431,16 @@ export default function LibraryDetail() {
 const EPISODE_STATUS_STYLE: Record<string, { bg: string; fg: string }> = {
   pending: { bg: "transparent", fg: "#6C7180" },
   found: { bg: "transparent", fg: "#B5B9C4" },
+  ready: { bg: "transparent", fg: "#6FC48A" },
   downloading: { bg: "#FF6A45", fg: "#0B0C10" },
   available: { bg: "#6FC48A", fg: "#0B0C10" },
   error: { bg: "#E5484D", fg: "#0B0C10" },
+  deleted: { bg: "transparent", fg: "#6C7180" },
 };
 
 function EpisodeItem({ episode, watch, airingAt }: { episode: Episode; watch: Watch; airingAt?: number }) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   // Fora do intervalo escolhido ("Quais episódios baixar"): o motor não
   // busca, mas o episódio continua na lista em vez de sumir.
   const n = episode.episode_number;
@@ -448,10 +473,12 @@ function EpisodeItem({ episode, watch, airingAt }: { episode: Episode; watch: Wa
     ? { label: t("episodeStatus.announced"), ...muted }
     : waitingForLocalizedRelease
       ? { label: t("episodeStatus.waitingLanguage"), ...muted }
-      : {
-          label: episodeStatusLabel(episode.status),
-          ...(EPISODE_STATUS_STYLE[episode.status] ?? { bg: "transparent", fg: "#B5B9C4" }),
-        };
+      : watch.streaming && episode.status === "deleted"
+        ? { label: episodeStatusLabel("ready"), ...EPISODE_STATUS_STYLE.ready }
+        : {
+            label: episodeStatusLabel(episode.status),
+            ...(EPISODE_STATUS_STYLE[episode.status] ?? { bg: "transparent", fg: "#B5B9C4" }),
+          };
   return (
     <div className="flex items-center gap-3 rounded-[10px] border border-[#1E212A] bg-[#15171D] px-4 py-3">
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -482,7 +509,20 @@ function EpisodeItem({ episode, watch, airingAt }: { episode: Episode; watch: Wa
       >
         {s.label}
       </span>
-      {episode.status !== "deleted" && !notYetAired && (
+      {n != null &&
+        (episode.status === "downloading" ||
+          (watch.streaming && !notYetAired && !outOfRange && episode.status !== "available")) && (
+        <button
+          type="button"
+          onClick={() => navigate(`/watch/${watch.id}/${n}`)}
+          title={t("detail.watchNowHint")}
+          className="flex shrink-0 items-center gap-1.5 rounded-[8px] border border-[#262A35] px-2.5 py-1 text-[11px] font-semibold text-foreground transition-colors hover:bg-secondary"
+        >
+          <Play className="size-3" fill="currentColor" />
+          {t("detail.watchNow")}
+        </button>
+      )}
+      {!notYetAired && (
         <EpisodeActionsMenu episode={episode} watch={watch} outOfRange={outOfRange} />
       )}
     </div>
@@ -556,7 +596,11 @@ function EpisodeActionsMenu({
             className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-white/5 disabled:opacity-40"
           >
             <RefreshCw className={`size-3.5 text-[#6C7180] ${forceCheck.isPending ? "animate-spin" : ""}`} />
-            {outOfRange ? t("detail.downloadNow") : t("detail.forceCheck")}
+            {episode.status === "deleted"
+              ? t("detail.downloadAgain")
+              : outOfRange
+                ? t("detail.downloadNow")
+                : t("detail.forceCheck")}
           </button>
         </PopoverContent>
       </Popover>

@@ -28,6 +28,9 @@ pub struct Episode {
     pub video_processed_at: Option<String>,
     /// Última vez que o player salvou progresso (ordena o "Continuar assistindo").
     pub watch_progress_at: Option<String>,
+    /// MKV conferido/corrigido do CRC32 no índice (ver `mkv_fix`).
+    #[sqlx(default)]
+    pub container_fixed_at: Option<String>,
 }
 
 pub struct NewEpisode<'a> {
@@ -169,8 +172,17 @@ pub async fn mark_pending(pool: &SqlitePool, id: i64) -> Result<(), sqlx::Error>
     Ok(())
 }
 
+/// Lista da tela de Downloads: o que está na fila/baixando sempre (antes
+/// entrava só pela data de criação, e um episódio baixado de novo — que
+/// mantém a data antiga — não aparecia), depois erros e prontos recentes.
+/// Placeholders "procurando" e removidos ficam de fora.
 pub async fn list_recent(pool: &SqlitePool, limit: i64) -> Result<Vec<Episode>, sqlx::Error> {
-    sqlx::query_as::<_, Episode>("SELECT * FROM episodes ORDER BY added_at DESC LIMIT ?")
+    sqlx::query_as::<_, Episode>(
+        "SELECT * FROM episodes WHERE status IN ('found', 'downloading', 'error', 'available') \
+         ORDER BY CASE WHEN status IN ('found', 'downloading') THEN 0 ELSE 1 END, \
+                  COALESCE(available_at, added_at) DESC \
+         LIMIT ?",
+    )
         .bind(limit)
         .fetch_all(pool)
         .await
@@ -235,6 +247,15 @@ pub async fn mark_downloading(pool: &SqlitePool, id: i64, info_hash: &str) -> Re
 /// torrent seguir rastreado (não paramos de rastrear ao terminar, pra
 /// "remover" continuar funcionando depois), então `available_at` só deve
 /// ser setado na PRIMEIRA vez, não reatualizado a cada 2s.
+/// Fonte achada, esperando ser aberta no player (anime em modo Streaming).
+pub async fn mark_ready(pool: &SqlitePool, id: i64) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE episodes SET status = 'ready', info_hash = NULL, error_message = NULL WHERE id = ?")
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 pub async fn mark_available(pool: &SqlitePool, id: i64) -> Result<(), sqlx::Error> {
     let now = chrono::Utc::now().to_rfc3339();
     sqlx::query(
@@ -295,7 +316,7 @@ pub async fn save_progress(
     sqlx::query(
         "UPDATE episodes SET watch_position_ms = ?, watch_progress_at = ?, \
          watched_at = CASE WHEN ? THEN COALESCE(watched_at, ?) ELSE watched_at END \
-         WHERE watch_id = ? AND episode_number = ? AND status = 'available'",
+         WHERE watch_id = ? AND episode_number = ? AND status IN ('available', 'downloading')",
     )
     .bind(position_ms)
     .bind(&now)
@@ -317,6 +338,25 @@ pub async fn list_postprocess_pending(pool: &SqlitePool) -> Result<Vec<Episode>,
     )
     .fetch_all(pool)
     .await
+}
+
+/// MKV prontos ainda não conferidos pelo `mkv_fix`.
+pub async fn list_container_pending(pool: &SqlitePool) -> Result<Vec<Episode>, sqlx::Error> {
+    sqlx::query_as::<_, Episode>(
+        "SELECT * FROM episodes WHERE status = 'available' AND item_path IS NOT NULL \
+         AND lower(item_path) LIKE '%.mkv' AND container_fixed_at IS NULL ORDER BY available_at DESC",
+    )
+    .fetch_all(pool)
+    .await
+}
+
+pub async fn mark_container_fixed(pool: &SqlitePool, id: i64) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE episodes SET container_fixed_at = ? WHERE id = ?")
+        .bind(chrono::Utc::now().to_rfc3339())
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
 }
 
 pub async fn mark_video_processed(pool: &SqlitePool, id: i64) -> Result<(), sqlx::Error> {

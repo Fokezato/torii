@@ -32,6 +32,8 @@ import {
   playerSetAudioTrack,
   playerSetPaused,
   playerSetSubtitleTrack,
+  playerSubtitleCues,
+  type SubtitleCue,
   playerSetVolume,
   playerSnapshot,
   type MediaProbe,
@@ -40,10 +42,18 @@ import {
   type SkipSegments,
   type TrackInfo,
 } from "@/lib/player";
-import { listWatchEpisodes, type Episode } from "@/lib/episodes";
+import { episodePrefetchNext, episodeStreamStart, listWatchEpisodes, type Episode } from "@/lib/episodes";
+import { isStreamStartable } from "@/lib/continueWatching";
 import { formatPlayerTitle, parseEpisodeLabel, parseEpisodeNumber } from "@/lib/episodeName";
 import { listWatches, type Watch } from "@/lib/watches";
 import { getSettings } from "@/lib/tauri";
+import { PlayerSettingsButton } from "@/components/player/PlayerSettingsButton";
+import { SubtitleLayer } from "@/components/player/SubtitleLayer";
+import {
+  DEFAULT_SUBTITLE_STYLE,
+  subtitleStyleFromSettings,
+  type SubtitleStyle,
+} from "@/lib/subtitleStyle";
 import { episodeStatusLabel } from "@/lib/constants";
 import { useTranslation } from "react-i18next";
 import {
@@ -104,8 +114,20 @@ function segmentRange(s: SkipSegments, kind: SegmentKind): [number, number] | nu
   return start != null && end != null && end > start ? [start, end] : null;
 }
 
+/// Fonte servida pelo stream local (episódio ainda baixando, ver
+/// src-tauri/src/stream_server.rs).
+function isStreamSource(source: string | null | undefined): boolean {
+  return !!source && source.startsWith("http://127.0.0.1:");
+}
+
 function episodeSource(ep: Episode): string | null {
-  return ep.status === "available" ? (ep.item_path ?? ep.save_path ?? null) : null;
+  return ep.status === "available" ? (ep.item_path ?? null) : null;
+}
+
+/// Dá pra abrir no player: baixado, ainda baixando (stream local) ou anime
+/// em modo Streaming (baixa e toca na hora).
+function canPlay(ep: Episode, watch: Watch | null): boolean {
+  return episodeSource(ep) != null || ep.status === "downloading" || isStreamStartable(watch, ep);
 }
 
 function episodeNumberOf(ep: Episode): number | null {
@@ -114,9 +136,11 @@ function episodeNumberOf(ep: Episode): number | null {
 
 /// Troca a mídia tocando pra esse episódio. `watch` dá o título CRU da
 /// temporada e o nome do anime — `formatPlayerTitle` monta H1/H2.
-function openEpisode(ep: Episode, watchId: number, watch: Watch | null): Promise<void> {
-  const source = episodeSource(ep);
-  if (!source) return Promise.resolve();
+async function openEpisode(ep: Episode, watchId: number, watch: Watch | null): Promise<void> {
+  const source =
+    episodeSource(ep) ??
+    (ep.status === "downloading" || isStreamStartable(watch, ep) ? await episodeStreamStart(ep.id).catch(() => null) : null);
+  if (!source) return;
   const rawLabel = parseEpisodeLabel(ep.name, ep.episode_number);
   const { title, episodeLabel } = watch
     ? formatPlayerTitle(watch.title, rawLabel, watch.series_title)
@@ -147,10 +171,10 @@ function skipSegment(snap: PlayerSnapshot, endMs: number, seek: (ms: number) => 
 async function openNextEpisode(snap: PlayerSnapshot): Promise<boolean> {
   if (snap.watch_id == null || snap.episode_number == null) return false;
   const [episodes, watches] = await Promise.all([listWatchEpisodes(snap.watch_id), listWatches()]);
-  const next = episodes.find((e) => episodeNumberOf(e) === snap.episode_number! + 1 && episodeSource(e));
+  const watch = watches.find((w) => w.id === snap.watch_id) ?? null;
+  const next = episodes.find((e) => episodeNumberOf(e) === snap.episode_number! + 1 && canPlay(e, watch));
   if (!next) return false;
-  const watch = watches.find((w) => w.id === snap.watch_id);
-  await openEpisode(next, snap.watch_id, watch ?? null);
+  await openEpisode(next, snap.watch_id, watch);
   return true;
 }
 
@@ -163,6 +187,12 @@ async function openNextEpisode(snap: PlayerSnapshot): Promise<boolean> {
 export default function PlayerOverlay() {
   const { t } = useTranslation();
   const [snapshot, setSnapshot] = useState<PlayerSnapshot | null>(null);
+  // Vídeo parado esperando dado (abrindo, ou stream esperando o torrent
+  // baixar o trecho): a posição não anda mesmo sem estar pausado.
+  const [stalled, setStalled] = useState(false);
+  const lastMoveRef = useRef<{ pos: number; at: number }>({ pos: -1, at: 0 });
+  // Próximo episódio já pedido pra baixar nesta sessão (modo Streaming).
+  const prefetchDoneRef = useRef(false);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [scrubbingPct, setScrubbingPct] = useState<number | null>(null);
   const [pendingSeek, setPendingSeek] = useState<{ ms: number; at: number } | null>(null);
@@ -198,7 +228,7 @@ export default function PlayerOverlay() {
   }, []);
   // Menu de áudio/legenda e painel de episódios são exclusivos — abrir um
   // fecha o outro (antes ficavam os 2 abertos um em cima do outro).
-  const [openMenu, setOpenMenu] = useState<"tracks" | "episodes" | null>(null);
+  const [openMenu, setOpenMenu] = useState<"tracks" | "episodes" | "settings" | null>(null);
   const episodesOpen = openMenu === "episodes";
   const closingPanelAtRef = useRef(0);
   const [preferredLangs, setPreferredLangs] = useState<{ audio: string[]; subtitle: string[] }>({
@@ -223,6 +253,17 @@ export default function PlayerOverlay() {
   // Progresso salvo a cada PROGRESS_SAVE_MS; "assistido" marcado 1x por episódio.
   const lastProgressSaveRef = useRef(0);
   const watchedMarkedRef = useRef(false);
+  // Legenda personalizada (desenhada aqui, ver SubtitleLayer): estilo, faixa
+  // escolhida (posição entre as faixas de legenda do arquivo) e falas.
+  const [subStyle, setSubStyle] = useState<SubtitleStyle>(DEFAULT_SUBTITLE_STYLE);
+  const [customOrdinal, setCustomOrdinal] = useState<number | null>(null);
+  const customOrdinalRef = useRef<number | null>(null);
+  customOrdinalRef.current = customOrdinal;
+  const [cues, setCues] = useState<SubtitleCue[] | null>(null);
+  // Faixa inicial já resolvida nessa sessão / extração falhou (volta pro VLC).
+  const subResolvedRef = useRef(false);
+  const customFailedRef = useRef(false);
+  const autoSelectAtRef = useRef(0);
 
   useEffect(() => {
     document.documentElement.style.background = "transparent";
@@ -251,11 +292,16 @@ export default function PlayerOverlay() {
             sessionKeyRef.current = sessionKey;
             autoSelectDoneRef.current = false;
             skipFetchDoneRef.current = false;
+            prefetchDoneRef.current = false;
             autoSkippedRef.current = { intro: false, ending: false, recap: false };
             nextTriggeredRef.current = false;
             watchedMarkedRef.current = false;
             lastProgressSaveRef.current = 0;
             setSkipSegments(null);
+            setCustomOrdinal(null);
+            setCues(null);
+            subResolvedRef.current = false;
+            customFailedRef.current = false;
             // Episódio novo: agulha volta a seguir o player do zero, sem
             // herdar arraste/seek pendente do episódio anterior.
             setScrubbingPct(null);
@@ -284,6 +330,7 @@ export default function PlayerOverlay() {
                   },
                   nextAfterEnding: s.player_next_after_ending === "1",
                 });
+                setSubStyle(subtitleStyleFromSettings(s));
               })
               .catch(() => {});
           }
@@ -300,6 +347,16 @@ export default function PlayerOverlay() {
           // Progresso + "assistido" (chegou no encerramento; sem dado de
           // encerramento, 90% do episódio). Base do "apagar depois de
           // assistir" — ver engine::cleanup_once no Rust.
+          if (
+            !prefetchDoneRef.current &&
+            snap.watch_id != null &&
+            snap.episode_number != null &&
+            snap.duration_ms > 0 &&
+            snap.position_ms >= snap.duration_ms / 2
+          ) {
+            prefetchDoneRef.current = true;
+            episodePrefetchNext(snap.watch_id, snap.episode_number).catch(() => {});
+          }
           if (snap.watch_id != null && snap.episode_number != null && snap.duration_ms > 0) {
             const endingStart = skipSegments ? segmentRange(skipSegments, "ending")?.[0] : undefined;
             const watchedPoint = endingStart ?? snap.duration_ms * 0.9;
@@ -355,6 +412,7 @@ export default function PlayerOverlay() {
                 // libvlc, tenta de novo no próximo tick em vez de desistir.
                 if (audioTracks.length === 0 && subtitleTracks.length === 0) return;
                 autoSelectDoneRef.current = true;
+                autoSelectAtRef.current = Date.now();
                 if (preferredLangs.audio.length > 0) {
                   const match = findPreferredTrack(audioTracks, preferredLangs.audio);
                   if (match) playerSetAudioTrack(match.id).catch(() => {});
@@ -362,6 +420,30 @@ export default function PlayerOverlay() {
                 if (preferredLangs.subtitle.length > 0) {
                   const match = findPreferredTrack(subtitleTracks, preferredLangs.subtitle);
                   if (match) playerSetSubtitleTrack(match.id).catch(() => {});
+                }
+              })
+              .catch(() => {});
+          }
+          // Legenda personalizada: depois da preferência de idioma aplicada,
+          // pega a faixa que o VLC escolheu, desliga a legenda dele e passa a
+          // desenhar aqui.
+          const noPrefs = preferredLangs.audio.length === 0 && preferredLangs.subtitle.length === 0;
+          const prefsApplied = noPrefs || (autoSelectDoneRef.current && Date.now() - autoSelectAtRef.current > 600);
+          if (
+            subStyle.mode === "custom" &&
+            !isStreamSource(snap.source) &&
+            !subResolvedRef.current &&
+            !customFailedRef.current &&
+            prefsApplied
+          ) {
+            playerListSubtitleTracks()
+              .then((tracks) => {
+                if (tracks.length === 0) return;
+                subResolvedRef.current = true;
+                const active = tracks.filter((tr) => tr.id >= 0).findIndex((tr) => tr.active);
+                if (active >= 0) {
+                  setCustomOrdinal(active);
+                  playerSetSubtitleTrack(-1).catch(() => {});
                 }
               })
               .catch(() => {});
@@ -374,7 +456,64 @@ export default function PlayerOverlay() {
       playerBringToFront().catch(() => {});
     }, 400);
     return () => clearInterval(id);
-  }, [preferredLangs, skipSettings, skipSegments]);
+  }, [preferredLangs, skipSettings, skipSegments, subStyle.mode]);
+
+  // Falas da faixa escolhida. Sem texto (legenda de imagem) ou erro: volta
+  // pra legenda do VLC nessa sessão.
+  const currentSource = snapshot?.source ?? null;
+  useEffect(() => {
+    if (subStyle.mode !== "custom" || customOrdinal == null || !currentSource || isStreamSource(currentSource)) {
+      setCues(null);
+      return;
+    }
+    let cancelled = false;
+    playerSubtitleCues(currentSource, customOrdinal)
+      .then((c) => {
+        if (!cancelled) setCues(c);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        customFailedRef.current = true;
+        restoreVlcSubtitle(customOrdinal);
+        setCustomOrdinal(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentSource, customOrdinal, subStyle.mode]);
+
+  /// Religa no VLC a faixa `ordinal` (sai do modo personalizado).
+  function restoreVlcSubtitle(ordinal: number) {
+    playerListSubtitleTracks()
+      .then((tracks) => {
+        const track = tracks.filter((tr) => tr.id >= 0)[ordinal];
+        if (track) playerSetSubtitleTrack(track.id).catch(() => {});
+      })
+      .catch(() => {});
+  }
+
+  function changeSubStyle(next: SubtitleStyle) {
+    if (next.mode !== subStyle.mode) {
+      if (next.mode === "custom") {
+        subResolvedRef.current = false;
+        customFailedRef.current = false;
+      } else if (customOrdinalRef.current != null) {
+        restoreVlcSubtitle(customOrdinalRef.current);
+        setCustomOrdinal(null);
+        setCues(null);
+      }
+    }
+    setSubStyle(next);
+  }
+
+  /// Menu de legendas no modo personalizado: troca a faixa desenhada aqui
+  /// (o VLC fica sem legenda).
+  function selectCustomSubtitle(ordinal: number | null) {
+    subResolvedRef.current = true;
+    customFailedRef.current = false;
+    setCustomOrdinal(ordinal);
+    playerSetSubtitleTrack(-1).catch(() => {});
+  }
 
   useEffect(() => {
     function resetIdle() {
@@ -394,6 +533,24 @@ export default function PlayerOverlay() {
   }, []);
 
   const isPaused = snapshot?.state === "paused";
+
+  useEffect(() => {
+    if (!snapshot) return;
+    const now = Date.now();
+    const last = lastMoveRef.current;
+    if (snapshot.position_ms !== last.pos) {
+      lastMoveRef.current = { pos: snapshot.position_ms, at: now };
+      if (snapshot.state !== "opening" && snapshot.state !== "buffering") {
+        setStalled(false);
+        return;
+      }
+    }
+    const waiting =
+      snapshot.state === "opening" ||
+      snapshot.state === "buffering" ||
+      (snapshot.state === "playing" && now - last.at > 1000);
+    setStalled(waiting);
+  }, [snapshot]);
   const durationMs = snapshot?.duration_ms ?? 0;
   const positionMs =
     scrubbingPct != null
@@ -491,6 +648,29 @@ export default function PlayerOverlay() {
         togglePause();
       }}
     >
+      {subStyle.mode === "custom" && cues && snapshot && (
+        <SubtitleLayer
+          cues={cues}
+          positionMs={snapshot.position_ms}
+          playing={snapshot.is_playing}
+          style={subStyle}
+          controlsVisible={controlsVisible}
+        />
+      )}
+
+      {stalled && !controlsVisible && (
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+          <span className="size-[76px] animate-spin rounded-full border-[3px] border-white/20 border-t-white" />
+        </div>
+      )}
+      {stalled && isStreamSource(snapshot?.source) && (
+        <div className="pointer-events-none absolute inset-x-0 top-1/2 flex translate-y-16 justify-center">
+          <span className="rounded-md bg-black/60 px-3 py-1 text-[13px] font-medium text-white/90">
+            {t("player.streamBuffering")}
+          </span>
+        </div>
+      )}
+
       {/* TOPO: voltar + título/episódio, os 2 do lado esquerdo */}
       <div
         className="absolute inset-x-0 top-0 flex items-center gap-4 px-6 pt-5 pb-16 transition-opacity duration-300"
@@ -543,8 +723,11 @@ export default function PlayerOverlay() {
             type="button"
             aria-label={isPaused ? t("player.play") : t("player.pause")}
             onClick={togglePause}
-            className="flex size-16 items-center justify-center rounded-full bg-white/15 text-white backdrop-blur-sm transition-colors hover:bg-white/25"
+            className="relative flex size-16 items-center justify-center rounded-full bg-white/15 text-white backdrop-blur-sm transition-colors hover:bg-white/25"
           >
+            {stalled && !isPaused && (
+              <span className="pointer-events-none absolute -inset-1.5 animate-spin rounded-full border-[3px] border-white/20 border-t-white" />
+            )}
             {isPaused ? (
               <Play className="size-7 translate-x-0.5" fill="currentColor" />
             ) : (
@@ -607,6 +790,14 @@ export default function PlayerOverlay() {
               preferredSubtitle={preferredLangs.subtitle}
               open={openMenu === "tracks"}
               setOpen={(o) => setOpenMenu((m) => (o ? "tracks" : m === "tracks" ? null : m))}
+              customSubtitle={subStyle.mode === "custom" && !customFailedRef.current ? customOrdinal : undefined}
+              onCustomSubtitle={selectCustomSubtitle}
+            />
+            <PlayerSettingsButton
+              open={openMenu === "settings"}
+              setOpen={(o) => setOpenMenu((m) => (o ? "settings" : m === "settings" ? null : m))}
+              subStyle={subStyle}
+              onSubStyleChange={changeSubStyle}
             />
 
             <button
@@ -1008,7 +1199,16 @@ function EpisodeDetails({
         )}
       </div>
 
-      {!source ? (
+      {!source && onPlay ? (
+        <button
+          type="button"
+          onClick={onPlay}
+          className="flex items-center justify-center gap-2 rounded-md bg-white/90 px-3 py-2 text-[12px] font-semibold text-black transition-colors hover:bg-white"
+        >
+          <Play className="size-3.5" fill="currentColor" />
+          {t("detail.watchNow")}
+        </button>
+      ) : !source ? (
         <p className="text-[11px] text-white/45">{t("player.notDownloadedYet")}</p>
       ) : failed ? (
         <p className="text-[11px] text-white/45">{t("player.readFailed")}</p>
@@ -1135,7 +1335,7 @@ function EpisodesPanel({
           sorted.map((ep) => {
             const expanded = expandedId === ep.id;
             const isCurrent = currentEpisode != null && numberOf(ep) === currentEpisode;
-            const available = episodeSource(ep) != null;
+            const available = canPlay(ep, watch ?? null);
             return (
               <div
                 key={ep.id}
@@ -1191,12 +1391,18 @@ function TrackPickerButton({
   preferredSubtitle,
   open,
   setOpen,
+  customSubtitle,
+  onCustomSubtitle,
 }: {
   preferredAudio: string[];
   preferredSubtitle: string[];
   /** Controlado pelo pai — só 1 menu aberto por vez (ver `openMenu`). */
   open: boolean;
   setOpen: (open: boolean) => void;
+  /** Legenda personalizada ligada: faixa desenhada pelo Torii (posição entre
+   * as faixas de legenda; `null` = nenhuma). `undefined` = modo original. */
+  customSubtitle?: number | null;
+  onCustomSubtitle: (ordinal: number | null) => void;
 }) {
   const { t } = useTranslation();
   const [audioTracks, setAudioTracks] = useState<TrackInfo[]>([]);
@@ -1218,9 +1424,20 @@ function TrackPickerButton({
   // legenda nenhuma) — id < 0 = entrada "Desabilitado" do próprio libvlc,
   // sempre mostra ali, não é idioma pra filtrar por preferência.
   const filteredAudio = audioTracks.filter((track) => track.id >= 0 && trackMatchesPreferred(track.name, preferredAudio));
-  const filteredSubtitle = subtitleTracks.filter(
-    (track) => track.id < 0 || trackMatchesPreferred(track.name, preferredSubtitle),
-  );
+  // No modo personalizado a faixa "ativa" é a desenhada pelo Torii (o VLC
+  // fica sem legenda) — posição entre as faixas de legenda do arquivo.
+  const realSubtitles = subtitleTracks.filter((track) => track.id >= 0);
+  const customMode = customSubtitle !== undefined;
+  const filteredSubtitle = subtitleTracks
+    .filter((track) => track.id < 0 || trackMatchesPreferred(track.name, preferredSubtitle))
+    .map((track) =>
+      customMode
+        ? {
+            ...track,
+            active: track.id < 0 ? customSubtitle === null : realSubtitles.indexOf(track) === customSubtitle,
+          }
+        : track,
+    );
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -1249,7 +1466,14 @@ function TrackPickerButton({
         <TrackSection
           label={t("detail.subtitle")}
           tracks={filteredSubtitle}
-          onSelect={(id) => playerSetSubtitleTrack(id).then(() => setOpen(false))}
+          onSelect={(id) => {
+            if (customMode) {
+              onCustomSubtitle(id < 0 ? null : realSubtitles.findIndex((track) => track.id === id));
+              setOpen(false);
+            } else {
+              playerSetSubtitleTrack(id).then(() => setOpen(false));
+            }
+          }}
         />
       </PopoverContent>
     </Popover>

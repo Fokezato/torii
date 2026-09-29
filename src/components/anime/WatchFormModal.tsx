@@ -105,17 +105,19 @@ export function WatchFormModal({ anime, onOpenChange }: WatchFormModalProps) {
         cover_url: anime!.cover_url,
         status: anime!.status,
         episodes: anime!.episodes,
-        active: autoDownload,
+        // Streaming: o poller segue achando as fontes (sem baixar).
+        active: tab === "streaming" ? true : autoDownload,
+        streaming: tab === "streaming",
         notify_on_available: notify,
         episode_start: rangeIsFull ? null : episodeRange[0],
         episode_end: rangeIsFull ? null : episodeRange[1],
-        strip_audio: stripAudio,
-        max_resolution: downscale ? "720p" : null,
+        strip_audio: tab === "local" && stripAudio,
+        max_resolution: tab === "local" && downscale ? "720p" : null,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["watches"] });
       // Já deixa o ffmpeg baixando, pra estar pronto quando o 1º episódio terminar.
-      if (stripAudio || downscale) ffmpegInstall().catch(() => {});
+      if (tab === "local" && (stripAudio || downscale)) ffmpegInstall().catch(() => {});
       onOpenChange(false);
     },
   });
@@ -184,8 +186,13 @@ export function WatchFormModal({ anime, onOpenChange }: WatchFormModalProps) {
               </button>
             </div>
 
-            {tab === "local" ? (
+            {
               <div role="tabpanel" className="flex flex-col gap-[18px] p-[22px]">
+                {tab === "streaming" && (
+                  <p className="rounded-lg border border-[#262A35] bg-[#1B1E27] px-3 py-2.5 text-[11.5px] text-[#9BA0AE]">
+                    {t("addAnime.streamingText")}
+                  </p>
+                )}
                 <div className="flex items-center justify-between gap-5">
                   <span className="text-[13px] font-semibold">{t("detail.quality")}</span>
                   <DropdownSelect value={quality} onChange={setQuality} options={qualityOptions()} />
@@ -206,15 +213,17 @@ export function WatchFormModal({ anime, onOpenChange }: WatchFormModalProps) {
 
                 <div className="h-px bg-[#1E212A]" />
 
-                <div className="flex items-center justify-between gap-5">
-                  <div className="flex flex-col gap-0.5">
-                    <span className="text-[13px] font-semibold">
-                      {t("addAnime.autoDownload")}
-                    </span>
-                    <span className="text-[11.5px] text-[#6C7180]">{t("addAnime.autoDownloadHint")}</span>
+                {tab === "local" && (
+                  <div className="flex items-center justify-between gap-5">
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-[13px] font-semibold">
+                        {t("addAnime.autoDownload")}
+                      </span>
+                      <span className="text-[11.5px] text-[#6C7180]">{t("addAnime.autoDownloadHint")}</span>
+                    </div>
+                    <Switch checked={autoDownload} onCheckedChange={setAutoDownload} />
                   </div>
-                  <Switch checked={autoDownload} onCheckedChange={setAutoDownload} />
-                </div>
+                )}
                 <div className="flex items-center justify-between gap-5">
                   <span className="text-[13px] font-semibold">
                     {t("addAnime.notifyReady")}
@@ -261,32 +270,31 @@ export function WatchFormModal({ anime, onOpenChange }: WatchFormModalProps) {
                         <span>{t("common.episodeShort", { number: totalEpisodes })}</span>
                       </div>
 
-                      <div className="my-1 h-px bg-[#1E212A]" />
-                      <span className="text-[13px] font-semibold">{t("reduceSize.title")}</span>
-                      <IrreversibleToggle
-                        feature="stripAudio"
-                        scope="anime"
-                        checked={stripAudio}
-                        forcedOn={globalStrip}
-                        onCheckedChange={setStripAudio}
-                      />
-                      <IrreversibleToggle
-                        feature="downscale"
-                        scope="anime"
-                        checked={downscale}
-                        forcedOn={globalDownscale}
-                        onCheckedChange={setDownscale}
-                      />
+                      {tab === "local" && (
+                        <>
+                          <div className="my-1 h-px bg-[#1E212A]" />
+                          <span className="text-[13px] font-semibold">{t("reduceSize.title")}</span>
+                          <IrreversibleToggle
+                            feature="stripAudio"
+                            scope="anime"
+                            checked={stripAudio}
+                            forcedOn={globalStrip}
+                            onCheckedChange={setStripAudio}
+                          />
+                          <IrreversibleToggle
+                            feature="downscale"
+                            scope="anime"
+                            checked={downscale}
+                            forcedOn={globalDownscale}
+                            onCheckedChange={setDownscale}
+                          />
+                        </>
+                      )}
                     </div>
                   )}
                 </div>
               </div>
-            ) : (
-              <div role="tabpanel" className="flex flex-col items-center gap-2 p-[22px] py-10 text-center">
-                <p className="text-sm font-semibold">{t("addAnime.streamingTitle")}</p>
-                <p className="max-w-xs text-xs text-[#6C7180]">{t("addAnime.streamingText")}</p>
-              </div>
-            )}
+            }
 
             <div className="flex items-center justify-end gap-3 border-t border-[#1E212A] px-[22px] py-[18px]">
               <button
@@ -298,7 +306,7 @@ export function WatchFormModal({ anime, onOpenChange }: WatchFormModalProps) {
               </button>
               <button
                 type="button"
-                disabled={tab === "streaming" || mutation.isPending}
+                disabled={mutation.isPending}
                 onClick={() => mutation.mutate()}
                 className="rounded-[10px] bg-primary px-5 py-2.5 text-[13px] font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
               >

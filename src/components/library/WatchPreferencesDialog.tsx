@@ -23,6 +23,7 @@ export function WatchPreferencesDialog({ watch, onOpenChange }: WatchPreferences
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [quality, setQuality] = useState("any");
+  const [streaming, setStreaming] = useState(false);
   const [audioLangs, setAudioLangs] = useState<string[]>([]);
   const [subLangs, setSubLangs] = useState<string[]>([]);
   const [deleteAfterDays, setDeleteAfterDays] = useState("");
@@ -51,6 +52,7 @@ export function WatchPreferencesDialog({ watch, onOpenChange }: WatchPreferences
       setSubLangs(watch.sub_lang ? watch.sub_lang.split(",") : []);
       setDeleteAfterDays(watch.delete_after_days != null ? String(watch.delete_after_days) : "");
       setNotify(watch.notify_on_available);
+      setStreaming(watch.streaming);
       setStripAudio(watch.strip_audio);
       setDownscale(watch.max_resolution === "720p");
       const max = watch.episodes ?? 24;
@@ -72,6 +74,7 @@ export function WatchPreferencesDialog({ watch, onOpenChange }: WatchPreferences
         episode_end: rangeIsFull ? null : episodeRange[1],
         max_resolution: downscale ? "720p" : null,
         strip_audio: stripAudio,
+        streaming,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["watches"] });
@@ -152,6 +155,13 @@ export function WatchPreferencesDialog({ watch, onOpenChange }: WatchPreferences
               <div className="flex items-center justify-between gap-5">
                 <span className="text-[13px] font-semibold">{t("preferences.notifyReady")}</span>
                 <Switch checked={notify} onCheckedChange={setNotify} />
+              </div>
+              <div className="flex items-center justify-between gap-5">
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-[13px] font-semibold">{t("preferences.streaming")}</span>
+                  <span className="text-[11.5px] text-[#6C7180]">{t("preferences.streamingHint")}</span>
+                </div>
+                <Switch checked={streaming} onCheckedChange={setStreaming} />
               </div>
 
               <div className="h-px bg-[#1E212A]" />

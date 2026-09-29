@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, FolderOpen, Inbox, Pause, Play, Users, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Eraser, FolderOpen, Inbox, Pause, Play, Users, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { openPath } from "@tauri-apps/plugin-opener";
+import { useNavigate } from "react-router-dom";
 import { getStorageStats } from "@/lib/stats";
 import { formatBytes } from "@/lib/format";
 import {
@@ -48,7 +49,19 @@ function useDismissedDownloads() {
     });
   }
 
-  return { dismissed, dismiss };
+  function dismissMany(episodeIds: number[]) {
+    setDismissed((prev) => {
+      const next = new Set([...prev, ...episodeIds]);
+      try {
+        localStorage.setItem(DISMISSED_STORAGE_KEY, JSON.stringify([...next]));
+      } catch {
+        // best-effort
+      }
+      return next;
+    });
+  }
+
+  return { dismissed, dismiss, dismissMany };
 }
 
 const FILTERS = [
@@ -137,6 +150,7 @@ function EpisodeRow({
   onResume,
   onDismiss,
   onCancel,
+  onWatch,
 }: {
   episode: Episode;
   watchTitle: string;
@@ -146,6 +160,8 @@ function EpisodeRow({
   onResume: () => void;
   onDismiss: () => void;
   onCancel: () => void;
+  /** Assistir enquanto baixa. */
+  onWatch: () => void;
 }) {
   const { t } = useTranslation();
   const totalBytes = progress?.total_bytes ?? 0;
@@ -170,7 +186,7 @@ function EpisodeRow({
           <span className="ml-auto shrink-0 text-[12px] text-[#8A8F9C]">
             {isDownloading
               ? `${formatBytes(progressBytes)} / ${totalBytes > 0 ? formatBytes(totalBytes) : "?"}`
-              : episode.status === "available"
+              : episode.status === "available" && totalBytes > 0
                 ? formatBytes(totalBytes)
                 : ""}
           </span>
@@ -217,6 +233,11 @@ function EpisodeRow({
       </div>
 
       <div className="flex shrink-0 items-center gap-2">
+        {isDownloading && !isPaused && (
+          <IconBtn label={t("detail.watchNow")} onClick={onWatch} color="#FF6A45">
+            <Play className="size-3.5" fill="currentColor" />
+          </IconBtn>
+        )}
         {isDownloading &&
           (isPaused ? (
             <IconBtn label={t("downloads.resume")} onClick={onResume} color="#FF6A45">
@@ -251,7 +272,8 @@ export default function Downloads() {
   const { t } = useTranslation();
   const [filter, setFilter] = useState<(typeof FILTERS)[number]["id"]>("all");
   const [progressByEpisode, setProgressByEpisode] = useState<Record<number, DownloadProgress>>({});
-  const { dismissed, dismiss } = useDismissedDownloads();
+  const { dismissed, dismiss, dismissMany } = useDismissedDownloads();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
 
   const { data: storage } = useQuery({ queryKey: ["storage-stats"], queryFn: getStorageStats });
@@ -300,6 +322,10 @@ export default function Downloads() {
 
   const filtered = filter === "all" ? visibleEpisodes : visibleEpisodes.filter((e) => e.status === filter);
 
+  // Tira os concluídos da lista (não mexe em arquivo nem na Biblioteca).
+  // Erros ficam — precisam de atenção.
+  const clearable = visibleEpisodes.filter((e) => e.status === "available");
+
   const totalDownloadSpeed = Object.values(progressByEpisode).reduce(
     (sum, p) => sum + (p.download_speed_mbps ?? 0),
     0,
@@ -336,7 +362,8 @@ export default function Downloads() {
         <StatTile label={t("downloads.spaceUsed")} value={formatBytes(storage?.used_bytes ?? 0)} />
       </div>
 
-      <nav aria-label={t("downloads.filter")} className="flex items-center gap-2">
+      <div className="flex items-center justify-between gap-3">
+        <nav aria-label={t("downloads.filter")} className="flex items-center gap-2">
         {FILTERS.map((f) => (
           <button
             key={f.id}
@@ -352,7 +379,17 @@ export default function Downloads() {
             {t(f.labelKey)} · {f.id === "all" ? visibleEpisodes.length : (counts[f.id] ?? 0)}
           </button>
         ))}
-      </nav>
+        </nav>
+        <button
+          type="button"
+          disabled={clearable.length === 0}
+          onClick={() => dismissMany(clearable.map((e) => e.id))}
+          className="flex items-center gap-2 rounded-full border border-[#23262F] px-4 py-2 text-[13px] font-semibold text-[#B5B9C4] transition-colors hover:text-foreground disabled:opacity-40"
+        >
+          <Eraser className="size-3.5" />
+          {t("downloads.clearHistory")}
+        </button>
+      </div>
 
       {filtered.length === 0 ? (
         <div className="flex flex-col items-center gap-3 rounded-[14px] border border-dashed border-[#23262F] py-16 text-center">
@@ -376,6 +413,10 @@ export default function Downloads() {
                 onPause={() => pauseEpisodeDownload(episode.id)}
                 onResume={() => resumeEpisodeDownload(episode.id)}
                 onDismiss={() => dismiss(episode.id)}
+                onWatch={() => {
+                  const n = episode.episode_number;
+                  if (n != null) navigate(`/watch/${episode.watch_id}/${n}`);
+                }}
                 onCancel={() =>
                   cancelEpisodeDownload(episode.id, true).then(() =>
                     queryClient.invalidateQueries({ queryKey: ["recent-episodes"] }),

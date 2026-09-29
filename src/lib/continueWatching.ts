@@ -4,12 +4,24 @@ import { getSettings } from "@/lib/tauri";
 import { parseEpisodeNumber, parseSeasonFromTitle } from "@/lib/episodeName";
 import type { Watch } from "@/lib/watches";
 
+/// Anime em modo Streaming: episódio que já saiu abre direto no player
+/// (baixa e toca na hora). "pending" fica de fora — pode nem ter saído.
+export function isStreamStartable(watch: Watch | null | undefined, ep: Episode): boolean {
+  return !!watch?.streaming && ["ready", "found", "downloading", "error", "deleted"].includes(ep.status);
+}
+
 export function episodeNumberOf(ep: Episode): number | null {
   return ep.episode_number ?? parseEpisodeNumber(ep.name);
 }
 
+/// Baixando: dá pra assistir enquanto baixa (stream local).
+export function isStreamable(ep: Episode): boolean {
+  return ep.status === "downloading";
+}
+
 export function isPlayable(ep: Episode): boolean {
-  return ep.status === "available" && !!(ep.item_path ?? ep.save_path);
+  // `save_path` é a PASTA do anime — nunca serve de fonte pro player.
+  return ep.status === "available" && !!ep.item_path;
 }
 
 /// Abre o episódio no player escolhido em Config > Reprodução: nativo
@@ -17,8 +29,9 @@ export function isPlayable(ep: Episode): boolean {
 export async function playEpisode(watch: Watch, episode: Episode, navigate: (to: string) => void) {
   const number = episodeNumberOf(episode);
   const settings = await getSettings().catch(() => ({}) as Record<string, string>);
-  const source = episode.item_path ?? episode.save_path;
-  if (settings.player_mode === "external" && source) {
+  const source = episode.item_path;
+  // Ainda baixando = só o player do Torii consegue assistir (stream local).
+  if (settings.player_mode === "external" && source && isPlayable(episode)) {
     await openPath(source);
   } else if (number != null) {
     navigate(`/watch/${watch.id}/${number}`);
@@ -26,7 +39,8 @@ export async function playEpisode(watch: Watch, episode: Episode, navigate: (to:
 }
 
 /// Episódio pra "continuar assistindo" um anime (todas as temporadas dele
-/// na Biblioteca): o 1º baixado e ainda não assistido, da temporada mais
+/// na Biblioteca): o 1º baixado (ou baixando, se já começou a ver por
+/// stream) e ainda não assistido, da temporada mais
 /// antiga pra mais nova. Tudo assistido → o último baixado (rever).
 /// `null` = nada baixado ainda.
 export async function findContinueEpisode(seasons: Watch[]): Promise<{ watch: Watch; episode: Episode } | null> {
@@ -38,10 +52,17 @@ export async function findContinueEpisode(seasons: Watch[]): Promise<{ watch: Wa
   let lastPlayable: { watch: Watch; episode: Episode } | null = null;
   for (const watch of ordered) {
     const episodes = (await listWatchEpisodes(watch.id))
-      .filter(isPlayable)
+      .filter((e) => isPlayable(e) || (isStreamable(e) && !!e.watch_progress_at) || isStreamStartable(watch, e))
       .sort((a, b) => (episodeNumberOf(a) ?? 0) - (episodeNumberOf(b) ?? 0));
     const unwatched = episodes.find((e) => !e.watched_at);
     if (unwatched) return { watch, episode: unwatched };
+    if (watch.streaming) {
+      const pending = (await listWatchEpisodes(watch.id))
+        .filter((e) => e.status === "pending" && !e.watched_at && episodeNumberOf(e) != null)
+        .sort((a, b) => (episodeNumberOf(a) ?? 0) - (episodeNumberOf(b) ?? 0))
+        .find((e) => watch.episode_start == null || (episodeNumberOf(e) ?? 0) >= watch.episode_start);
+      if (pending) return { watch, episode: pending };
+    }
     if (episodes.length > 0) lastPlayable = { watch, episode: episodes[episodes.length - 1] };
   }
   return lastPlayable;

@@ -31,6 +31,9 @@ export interface Watch {
    * null = ainda não resolvido (cai no agrupamento por título). */
   series_anilist_id: number | null;
   series_title: string | null;
+  /** Modo Streaming: nada baixa sozinho; ao abrir no player o episódio
+   * baixa e toca na hora, e é apagado depois de assistido. */
+  streaming: boolean;
 }
 
 /** Chave de agrupamento por anime: franquia da AniList quando resolvida,
@@ -97,6 +100,7 @@ export interface NewWatch {
   episode_end?: number | null;
   max_resolution?: string | null;
   strip_audio?: boolean | null;
+  streaming?: boolean | null;
 }
 
 export async function listWatches(): Promise<Watch[]> {
@@ -107,8 +111,13 @@ export async function createWatch(watch: NewWatch): Promise<Watch> {
   return invoke<Watch>("create_watch", { watch });
 }
 
-export async function deleteWatch(id: number): Promise<void> {
-  return invoke<void>("delete_watch", { id });
+/** "everything": tira da Biblioteca e apaga os arquivos; "keep_files": tira
+ * e mantém os arquivos; "files_only": apaga os arquivos e continua na
+ * Biblioteca. Devolve quantos arquivos não deu pra apagar. */
+export type RemoveMode = "everything" | "keep_files" | "files_only";
+
+export async function removeWatch(id: number, mode: RemoveMode): Promise<number> {
+  return invoke<number>("remove_watch", { id, mode });
 }
 
 export async function setWatchActive(id: number, active: boolean): Promise<void> {
@@ -133,6 +142,7 @@ export interface WatchPreferences {
   episode_end: number | null;
   max_resolution: string | null;
   strip_audio: boolean;
+  streaming: boolean;
 }
 
 export async function setWatchPreferences(id: number, prefs: WatchPreferences): Promise<void> {

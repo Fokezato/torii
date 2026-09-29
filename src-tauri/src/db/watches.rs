@@ -37,6 +37,10 @@ pub struct Watch {
     /// resolvido (sem anilist_id, ou AniList fora do ar).
     pub series_anilist_id: Option<i64>,
     pub series_title: Option<String>,
+    /// Modo "Streaming": o poller só acha a fonte (episódio 'ready'), o
+    /// download começa ao abrir no player e o arquivo some depois de
+    /// assistido. Ver `engine::start_stream`.
+    pub streaming: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -59,6 +63,7 @@ pub struct NewWatch {
     pub episode_end: Option<i64>,
     pub max_resolution: Option<String>,
     pub strip_audio: Option<bool>,
+    pub streaming: Option<bool>,
     /// Preenchidos pelo backend (ver `commands::watches::create_watch`),
     /// não pelo front.
     #[serde(skip)]
@@ -112,8 +117,8 @@ pub async fn create(pool: &SqlitePool, library_root: &str, w: NewWatch) -> Resul
 
     let id: i64 = sqlx::query_scalar(
         "INSERT INTO watches \
-         (title, query, anilist_id, cover_url, quality, audio_lang, sub_lang, folder, delete_after_days, active, notify_on_available, status, list_status, episodes, episode_start, episode_end, max_resolution, strip_audio, series_anilist_id, series_title, created_at, updated_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+         (title, query, anilist_id, cover_url, quality, audio_lang, sub_lang, folder, delete_after_days, active, notify_on_available, status, list_status, episodes, episode_start, episode_end, max_resolution, strip_audio, series_anilist_id, series_title, streaming, created_at, updated_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
     )
     .bind(&w.title)
     .bind(&w.query)
@@ -135,6 +140,7 @@ pub async fn create(pool: &SqlitePool, library_root: &str, w: NewWatch) -> Resul
     .bind(w.strip_audio.unwrap_or(false))
     .bind(w.series_anilist_id)
     .bind(&w.series_title)
+    .bind(w.streaming.unwrap_or(false))
     .bind(&now)
     .bind(&now)
     .fetch_one(pool)
@@ -210,6 +216,8 @@ pub struct WatchPreferences {
     pub max_resolution: Option<String>,
     #[serde(default)]
     pub strip_audio: bool,
+    #[serde(default)]
+    pub streaming: bool,
 }
 
 pub async fn set_preferences(
@@ -220,7 +228,7 @@ pub async fn set_preferences(
     sqlx::query(
         "UPDATE watches SET quality = ?, audio_lang = ?, sub_lang = ?, delete_after_days = ?, \
          notify_on_available = ?, episode_start = ?, episode_end = ?, max_resolution = ?, \
-         strip_audio = ?, updated_at = ? WHERE id = ?",
+         strip_audio = ?, streaming = ?, updated_at = ? WHERE id = ?",
     )
     .bind(&prefs.quality)
     .bind(&prefs.audio_lang)
@@ -231,6 +239,7 @@ pub async fn set_preferences(
     .bind(prefs.episode_end)
     .bind(&prefs.max_resolution)
     .bind(prefs.strip_audio)
+    .bind(prefs.streaming)
     .bind(chrono::Utc::now().to_rfc3339())
     .bind(id)
     .execute(pool)

@@ -85,6 +85,19 @@ impl TorrentEngine {
     /// Caminho completo do arquivo principal (maior arquivo) do torrent, se
     /// os metadados já resolveram. Usado pra renomear o arquivo baixado com
     /// um nome limpo assim que termina.
+    /// Torrent + arquivo principal (índice, tamanho, nome) do episódio, pra
+    /// assistir enquanto baixa (ver `stream_server`). `None` se o episódio
+    /// não está no motor ou os metadados ainda não chegaram.
+    pub async fn stream_target(&self, episode_id: i64) -> Option<(Arc<ManagedTorrent>, usize, u64, String)> {
+        let handle = self.active.lock().await.get(&episode_id).cloned()?;
+        let meta = handle.metadata.load();
+        let (index, file) = meta.as_ref()?.file_infos.iter().enumerate().max_by_key(|(_, f)| f.len)?;
+        let name = file.relative_filename.to_string_lossy().to_string();
+        let len = file.len;
+        drop(meta);
+        Some((handle, index, len, name))
+    }
+
     pub async fn primary_file_path(&self, episode_id: i64) -> Option<PathBuf> {
         let handle = self.active.lock().await.get(&episode_id).cloned()?;
         let output_folder = handle.output_folder().to_path_buf();

@@ -213,18 +213,38 @@ pub async fn poll_watch(app: &AppHandle, state: &AppState, watch: &db::watches::
                     state.activity.error(tr!("Erro ao salvar fontes de \"{clean_title}\": {e}", "Failed to save sources of \"{clean_title}\": {e}"));
                 }
                 let _ = db::episode_sources::set_active(&state.db, episode.id, &candidate.id).await;
-                start_download(
-                    app,
-                    state,
-                    episode.id,
-                    &watch.title,
-                    &candidate.title,
-                    &candidate.magnet,
-                    &watch.folder,
-                    watch.cover_url.clone(),
-                    !batch,
-                )
-                .await;
+                if watch.streaming {
+                    // Modo Streaming: só guarda a fonte; baixa ao abrir no player.
+                    if let Err(e) = db::episodes::mark_ready(&state.db, episode.id).await {
+                        state.activity.error(tr!("Erro ao salvar fonte de \"{clean_title}\": {e}", "Failed to save source of \"{clean_title}\": {e}"));
+                        continue;
+                    }
+                    if !batch {
+                        notify::notify(
+                            app,
+                            state,
+                            "notify_found",
+                            tr!("Novo episódio encontrado", "New episode found"),
+                            tr!("{clean_title} — pronto pra assistir", "{clean_title} — ready to watch"),
+                            "info",
+                            watch.cover_url.clone(),
+                        )
+                        .await;
+                    }
+                } else {
+                    start_download(
+                        app,
+                        state,
+                        episode.id,
+                        &watch.title,
+                        &candidate.title,
+                        &candidate.magnet,
+                        &watch.folder,
+                        watch.cover_url.clone(),
+                        !batch,
+                    )
+                    .await;
+                }
                 started += 1;
             }
             Ok(episode) if episode.status == "downloading" => {
@@ -241,12 +261,17 @@ pub async fn poll_watch(app: &AppHandle, state: &AppState, watch: &db::watches::
 
     if batch && started > 0 {
         let (base_title, _) = nyaa::split_season(&watch.title);
+        let body = if watch.streaming {
+            tr!("{started} episódios de {base_title} — prontos pra assistir", "{started} episodes of {base_title} — ready to watch")
+        } else {
+            tr!("{started} episódios de {base_title} — iniciando download", "{started} episodes of {base_title} — starting download")
+        };
         notify::notify(
             app,
             state,
             "notify_found",
             tr!("Novos episódios encontrados", "New episodes found"),
-            tr!("{started} episódios de {base_title} — iniciando download", "{started} episodes of {base_title} — starting download"),
+            body,
             "info",
             watch.cover_url.clone(),
         )
@@ -305,6 +330,10 @@ pub async fn resume_pending_downloads(app: AppHandle) {
 /// poder usar na sincronização com o Jellyfin.
 async fn rename_to_clean_filename(state: &AppState, episode_id: i64, watch_id: i64) -> Option<PathBuf> {
     let old_path = state.torrent.primary_file_path(episode_id).await?;
+    // Grava o caminho já — os retornos abaixo sem renomear (nome já limpo,
+    // sem nome limpo possível) deixavam `item_path` vazio, e o player
+    // recebia a PASTA do anime (o VLC tocava o 1º arquivo dela).
+    let _ = db::episodes::set_item_path(&state.db, episode_id, &old_path.to_string_lossy()).await;
     let Ok(watch) = db::watches::get(&state.db, watch_id).await else {
         return Some(old_path);
     };
@@ -412,6 +441,124 @@ pub async fn resync_jellyfin_library(app: AppHandle) {
 
 /// Consulta o progresso de todo torrent rastreado a cada tick, emite pro
 /// front via evento, e persiste quando um episódio termina de baixar.
+/// Busca agora a melhor fonte pra esse episódio e começa a baixar ("Forçar
+/// verificação", "Baixar de novo", "Baixar episódios"). `Ok(false)` = nada
+/// achado no Nyaa ainda.
+pub async fn force_download_episode(
+    app: &AppHandle,
+    state: &AppState,
+    episode_id: i64,
+    notify: bool,
+) -> Result<bool, crate::error::AppError> {
+    use crate::error::AppError;
+    let episode = db::episodes::get(&state.db, episode_id).await?;
+    let watch = db::watches::get(&state.db, episode.watch_id).await?;
+    let Some(episode_number) = episode
+        .episode_number
+        .or_else(|| episode.name.as_deref().and_then(crate::sources::nyaa::extract_episode_number).map(i64::from))
+    else {
+        return Err(AppError::Fetch(tr!("episódio sem número identificável", "episode has no recognizable number")));
+    };
+
+    let audio_langs = split_langs(&watch.audio_lang);
+    let sub_langs = split_langs(&watch.sub_lang);
+    let best = crate::sources::nyaa::find_best_for_episode(
+        &state.http,
+        &watch.query,
+        &watch.quality,
+        &audio_langs,
+        &sub_langs,
+        episode_number as u32,
+    )
+    .await
+    .map_err(AppError::Fetch)?;
+
+    let Some(episode_match) = best else {
+        state.activity.info(tr!("Forçar verificação: nada achado pra \"{}\" ep {episode_number}", "Check now: nothing found for \"{}\" ep {episode_number}", watch.title));
+        return Ok(false);
+    };
+
+    let candidate = &episode_match.primary;
+    db::episodes::switch_source(&state.db, episode_id, &candidate.id, &candidate.title, &candidate.magnet).await?;
+    db::episode_sources::add_many(&state.db, episode_id, candidate, &episode_match.alternates).await?;
+    db::episode_sources::set_active(&state.db, episode_id, &candidate.id).await?;
+    start_download(
+        app,
+        state,
+        episode_id,
+        &watch.title,
+        &candidate.title,
+        &candidate.magnet,
+        &watch.folder,
+        watch.cover_url,
+        notify,
+    )
+    .await;
+    Ok(true)
+}
+
+/// Deixa o episódio pronto pra assistir por stream: começa o download (fonte
+/// já achada pelo poller, ou busca agora no Nyaa) e espera os metadados do
+/// torrent. Usado ao abrir um episódio de anime em modo Streaming (ou um que
+/// já está baixando). Erro = nenhuma fonte / torrent sem peers.
+pub async fn start_stream(app: &AppHandle, state: &AppState, episode_id: i64) -> Result<(), crate::error::AppError> {
+    use crate::error::AppError;
+    if state.torrent.stream_target(episode_id).await.is_some() {
+        return Ok(());
+    }
+    let episode = db::episodes::get(&state.db, episode_id).await?;
+    let watch = db::watches::get(&state.db, episode.watch_id).await?;
+    let known_source = matches!(episode.status.as_str(), "ready" | "found" | "downloading")
+        .then_some(episode.magnet_uri.as_deref())
+        .flatten();
+    match known_source {
+        Some(magnet) => {
+            let title = episode.name.as_deref().unwrap_or("episódio");
+            start_download(app, state, episode_id, &watch.title, title, magnet, &watch.folder, watch.cover_url.clone(), false)
+                .await;
+        }
+        None => {
+            if !force_download_episode(app, state, episode_id, false).await? {
+                return Err(AppError::Fetch(tr!(
+                    "Nenhuma fonte encontrada pra esse episódio ainda",
+                    "No source found for this episode yet"
+                )));
+            }
+        }
+    }
+    if state.torrent.stream_target(episode_id).await.is_some() {
+        return Ok(());
+    }
+    let message = db::episodes::get(&state.db, episode_id)
+        .await
+        .ok()
+        .and_then(|e| e.error_message)
+        .unwrap_or_else(|| tr!("não foi possível iniciar o torrent", "couldn't start the torrent"));
+    Err(AppError::Fetch(message))
+}
+
+/// Anime em modo Streaming: começa a baixar o episódio seguinte a
+/// `episode_number` (chamado na metade do atual), pra ele abrir na hora.
+pub async fn prefetch_next(app: &AppHandle, state: &AppState, watch_id: i64, episode_number: i64) {
+    let Ok(watch) = db::watches::get(&state.db, watch_id).await else { return };
+    if !watch.streaming {
+        return;
+    }
+    let Ok(episodes) = db::episodes::list_for_watch(&state.db, watch_id).await else { return };
+    let Some(next) = episodes.into_iter().find(|e| e.episode_number == Some(episode_number + 1)) else {
+        return;
+    };
+    if next.watched_at.is_some() || matches!(next.status.as_str(), "available" | "downloading") {
+        return;
+    }
+    if let Err(e) = start_stream(app, state, next.id).await {
+        state.activity.info(tr!(
+            "Não deu pra adiantar o próximo episódio: {e}",
+            "Couldn't prefetch the next episode: {e}"
+        ));
+    }
+}
+
 /// Cancela o torrent atual do episódio (apagando o parcial) e recomeça pela
 /// fonte `source_item_id`, que tem que estar em `episode_sources`.
 pub async fn switch_source(
@@ -565,6 +712,7 @@ pub fn spawn_download_reconciler(app: AppHandle) {
                                 .await;
                             }
                             crate::intro_detect::spawn_pending(&app);
+                            crate::postprocess::spawn_pending(&app, currently_open_media(&app));
                             if let Some(path) = final_path {
                                 tauri::async_runtime::spawn(sync_jellyfin_after_download(
                                     app.clone(),
@@ -647,7 +795,74 @@ async fn remove_episode(
 ///
 /// `playing_path`: arquivo aberto no player agora — nunca é apagado (no
 /// Windows nem daria, arquivo em uso; e seria apagar no meio da sessão).
+/// Episódios prontos sem `item_path` (bug antigo, ver
+/// `rename_to_clean_filename`): acha o arquivo na pasta pelo "SxxEyy" do
+/// nome do release. Roda no boot.
+pub async fn repair_missing_item_paths(state: &AppState) {
+    let Ok(episodes) = db::episodes::list_by_status(&state.db, "available").await else { return };
+    let tag = regex::Regex::new(r"(?i)S(\d{1,2})E(\d{1,3})").unwrap();
+    for ep in episodes.iter().filter(|e| e.item_path.is_none()) {
+        let (Some(name), Some(folder)) = (ep.name.as_deref(), ep.save_path.as_deref()) else { continue };
+        let Some(want) = tag.captures(name).map(|c| (c[1].parse::<u32>().ok(), c[2].parse::<u32>().ok())) else {
+            continue;
+        };
+        let Ok(entries) = std::fs::read_dir(folder) else { continue };
+        let found = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| {
+                p.is_file()
+                    && p.extension().and_then(|x| x.to_str()).is_some_and(|x| {
+                        ["mkv", "mp4", "avi", "webm"].contains(&x.to_ascii_lowercase().as_str())
+                    })
+            })
+            .filter(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .and_then(|n| tag.captures(n))
+                    .map(|c| (c[1].parse::<u32>().ok(), c[2].parse::<u32>().ok()))
+                    == Some(want)
+            })
+            .max_by_key(|p| std::fs::metadata(p).map(|m| m.len()).unwrap_or(0));
+        if let Some(path) = found {
+            let _ = db::episodes::set_item_path(&state.db, ep.id, &path.to_string_lossy()).await;
+        }
+    }
+}
+
+/// Episódio "pronto" cujo arquivo sumiu (apagado na mão pela pasta) vira
+/// "removido" — senão a Biblioteca seguia mostrando pronto e o player
+/// falhava ao abrir. Atualiza a lista recebida também.
+pub async fn reconcile_missing_files(state: &AppState, episodes: &mut [db::episodes::Episode]) {
+    for ep in episodes.iter_mut().filter(|e| e.status == "available") {
+        let Some(path) = ep.item_path.as_deref() else { continue };
+        let file = std::path::Path::new(path);
+        // Pós-processamento trocando o arquivo neste instante (ver
+        // `media_file::run_and_replace`): some por um momento, não apagou.
+        if file.exists()
+            || file.with_extension("torii-old.mkv").exists()
+            || file.with_extension("torii-tmp.mkv").exists()
+        {
+            continue;
+        }
+        let _ = state.torrent.remove(ep.id, false).await;
+        if db::episodes::mark_deleted(&state.db, ep.id).await.is_ok() {
+            let name = ep.name.clone().unwrap_or_else(|| tr!("episódio #{}", "episode #{}", ep.id));
+            state.activity.info(tr!(
+                "Arquivo apagado fora do Torii, episódio marcado como removido: {name}",
+                "File deleted outside Torii, episode marked as removed: {name}"
+            ));
+            ep.status = "deleted".to_string();
+            ep.deleted_at = Some(chrono::Utc::now().to_rfc3339());
+        }
+    }
+}
+
 pub async fn cleanup_once(state: &AppState, playing_path: Option<String>) {
+    if let Ok(mut available) = db::episodes::list_available(&state.db).await {
+        reconcile_missing_files(state, &mut available).await;
+    }
+    cleanup_watched_streams(state, playing_path.as_deref()).await;
     let settings = match db::settings::get_all(&state.db).await {
         Ok(s) => s,
         Err(_) => return,
@@ -680,7 +895,10 @@ pub async fn cleanup_once(state: &AppState, playing_path: Option<String>) {
     };
 
     for ep in available {
-        if playing_path.is_some() && ep.item_path == playing_path {
+        // Tocando agora, pelo arquivo ou pelo stream local.
+        if playing_path.is_some() && ep.item_path == playing_path
+            || playing_path.as_deref().and_then(crate::stream_server::episode_of_url) == Some(ep.id)
+        {
             continue;
         }
         let Ok(watch) = db::watches::get(&state.db, ep.watch_id).await else {
@@ -694,9 +912,10 @@ pub async fn cleanup_once(state: &AppState, playing_path: Option<String>) {
             (Some(days), Some(available_at)) if (now - available_at).num_days() >= days => Some(days),
             _ => None,
         };
-        let watched_long_ago = delete_after_watched
-            && parse(ep.watched_at.as_deref())
-                .is_some_and(|watched_at| (now - watched_at).num_hours() >= watched_grace_hours);
+        // Streaming: apaga assim que assistido, independente da Config.
+        let watched_long_ago = parse(ep.watched_at.as_deref()).is_some_and(|watched_at| {
+            watch.streaming || (delete_after_watched && (now - watched_at).num_hours() >= watched_grace_hours)
+        });
         if expired_days.is_none() && !watched_long_ago {
             continue;
         }
@@ -709,6 +928,38 @@ pub async fn cleanup_once(state: &AppState, playing_path: Option<String>) {
                 Some(days) => state.activity.info(tr!("Removido por retenção ({days}d): {clean_title}", "Removed by retention ({days}d): {clean_title}")),
                 None => state.activity.info(tr!("Removido depois de assistido: {clean_title}", "Removed after watching: {clean_title}")),
             }
+        }
+    }
+}
+
+/// Anime em modo Streaming: apaga todo episódio já assistido (baixando ou
+/// baixado) — o que parou no meio e o próximo pré-baixado ficam. Roda ao
+/// abrir/fechar o player e na limpeza periódica. `playing`: fonte aberta no
+/// player agora (arquivo ou URL do stream), nunca apagada.
+pub async fn cleanup_watched_streams(state: &AppState, playing: Option<&str>) {
+    let playing_episode = playing.and_then(crate::stream_server::episode_of_url);
+    let mut candidates = Vec::new();
+    for status in ["downloading", "found", "ready", "available"] {
+        if let Ok(mut eps) = db::episodes::list_by_status(&state.db, status).await {
+            candidates.append(&mut eps);
+        }
+    }
+    for ep in candidates {
+        if ep.watched_at.is_none() || playing_episode == Some(ep.id) || (playing.is_some() && ep.item_path.as_deref() == playing) {
+            continue;
+        }
+        let Ok(watch) = db::watches::get(&state.db, ep.watch_id).await else { continue };
+        if !watch.streaming {
+            continue;
+        }
+        let _ = state.torrent.remove(ep.id, true).await;
+        if let Some(path) = &ep.item_path {
+            let _ = tokio::fs::remove_file(path).await;
+        }
+        if db::episodes::mark_deleted(&state.db, ep.id).await.is_ok() {
+            let title = ep.name.clone().unwrap_or_else(|| tr!("episódio #{}", "episode #{}", ep.id));
+            let clean_title = notify_episode_title(&watch.title, &title);
+            state.activity.info(tr!("Removido depois de assistido: {clean_title}", "Removed after watching: {clean_title}"));
         }
     }
 }

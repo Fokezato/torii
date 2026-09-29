@@ -1,5 +1,5 @@
 use crate::{db, db::episode_sources::EpisodeSource, db::episodes::Episode, engine, error::AppError, state::AppState};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 #[tauri::command]
 pub async fn list_recent_episodes(state: State<'_, AppState>) -> Result<Vec<Episode>, AppError> {
@@ -8,7 +8,9 @@ pub async fn list_recent_episodes(state: State<'_, AppState>) -> Result<Vec<Epis
 
 #[tauri::command]
 pub async fn list_available_episodes(state: State<'_, AppState>) -> Result<Vec<Episode>, AppError> {
-    Ok(db::episodes::list_available(&state.db).await?)
+    let mut episodes = db::episodes::list_available(&state.db).await?;
+    engine::reconcile_missing_files(&state, &mut episodes).await;
+    Ok(episodes.into_iter().filter(|e| e.status == "available").collect())
 }
 
 #[tauri::command]
@@ -16,7 +18,9 @@ pub async fn list_watch_episodes(
     state: State<'_, AppState>,
     watch_id: i64,
 ) -> Result<Vec<Episode>, AppError> {
-    Ok(db::episodes::list_for_watch(&state.db, watch_id).await?)
+    let mut episodes = db::episodes::list_for_watch(&state.db, watch_id).await?;
+    engine::reconcile_missing_files(&state, &mut episodes).await;
+    Ok(episodes)
 }
 
 #[tauri::command]
@@ -57,50 +61,88 @@ pub async fn force_check_episode(
     state: State<'_, AppState>,
     episode_id: i64,
 ) -> Result<bool, AppError> {
-    let episode = db::episodes::get(&state.db, episode_id).await?;
-    let watch = db::watches::get(&state.db, episode.watch_id).await?;
-    let Some(episode_number) = episode
-        .episode_number
-        .or_else(|| episode.name.as_deref().and_then(crate::sources::nyaa::extract_episode_number).map(i64::from))
-    else {
-        return Err(AppError::Fetch(tr!("episódio sem número identificável", "episode has no recognizable number")));
-    };
+    engine::force_download_episode(&app, &state, episode_id, true).await
+}
 
-    let audio_langs = engine::split_langs(&watch.audio_lang);
-    let sub_langs = engine::split_langs(&watch.sub_lang);
-    let best = crate::sources::nyaa::find_best_for_episode(
-        &state.http,
-        &watch.query,
-        &watch.quality,
-        &audio_langs,
-        &sub_langs,
-        episode_number as u32,
-    )
-    .await
-    .map_err(AppError::Fetch)?;
+/// URL pra assistir enquanto baixa (ver `stream_server`). Erro se o
+/// episódio não está baixando (sem torrent no motor).
+#[tauri::command]
+pub async fn episode_stream_url(app: AppHandle, state: State<'_, AppState>, episode_id: i64) -> Result<String, AppError> {
+    let server = app
+        .try_state::<crate::stream_server::StreamServer>()
+        .ok_or_else(|| AppError::Fetch("stream server unavailable".into()))?;
+    let (_, _, _, name) = state
+        .torrent
+        .stream_target(episode_id)
+        .await
+        .ok_or_else(|| AppError::Fetch(tr!("esse episódio não está baixando", "this episode isn't downloading")))?;
+    let extension = std::path::Path::new(&name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("mkv")
+        .to_ascii_lowercase();
+    Ok(server.url(episode_id, &extension))
+}
 
-    let Some(episode_match) = best else {
-        state.activity.info(tr!("Forçar verificação: nada achado pra \"{}\" ep {episode_number}", "Check now: nothing found for \"{}\" ep {episode_number}", watch.title));
-        return Ok(false);
-    };
+/// Abre o episódio por stream: começa o download se precisar (anime em modo
+/// Streaming, ver `engine::start_stream`) e devolve a URL local.
+#[tauri::command]
+pub async fn episode_stream_start(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    episode_id: i64,
+) -> Result<String, AppError> {
+    crate::engine::start_stream(&app, &state, episode_id).await?;
+    episode_stream_url(app, state, episode_id).await
+}
 
-    let candidate = &episode_match.primary;
-    db::episodes::switch_source(&state.db, episode_id, &candidate.id, &candidate.title, &candidate.magnet).await?;
-    db::episode_sources::add_many(&state.db, episode_id, candidate, &episode_match.alternates).await?;
-    db::episode_sources::set_active(&state.db, episode_id, &candidate.id).await?;
-    engine::start_download(
-        &app,
-        &state,
-        episode_id,
-        &watch.title,
-        &candidate.title,
-        &candidate.magnet,
-        &watch.folder,
-        watch.cover_url,
-        true,
-    )
-    .await;
-    Ok(true)
+/// Metade do episódio (modo Streaming): já começa a baixar o próximo.
+#[tauri::command]
+pub async fn episode_prefetch_next(app: AppHandle, watch_id: i64, episode_number: i64) -> Result<(), AppError> {
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<AppState>();
+        crate::engine::prefetch_next(&app, &state, watch_id, episode_number).await;
+    });
+    Ok(())
+}
+
+/// "Baixar episódios" da página do anime (temporada sem nada baixado): busca
+/// e começa todos os episódios que faltam — dentro do intervalo escolhido,
+/// se houver. Roda em segundo plano (1 busca no Nyaa por episódio); devolve
+/// quantos entraram na fila.
+#[tauri::command]
+pub async fn download_missing_episodes(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    watch_id: i64,
+) -> Result<usize, AppError> {
+    let watch = db::watches::get(&state.db, watch_id).await?;
+    let ids: Vec<i64> = db::episodes::list_for_watch(&state.db, watch_id)
+        .await?
+        .into_iter()
+        .filter(|e| matches!(e.status.as_str(), "pending" | "deleted" | "error"))
+        .filter(|e| {
+            e.episode_number.is_none_or(|n| {
+                watch.episode_start.is_none_or(|s| n >= s) && watch.episode_end.is_none_or(|end| n <= end)
+            })
+        })
+        .map(|e| e.id)
+        .collect();
+    let count = ids.len();
+    if count > 0 {
+        state.activity.info(tr!(
+            "Buscando {count} episódio(s) de \"{}\"...",
+            "Searching {count} episode(s) of \"{}\"...",
+            watch.title
+        ));
+        tauri::async_runtime::spawn(async move {
+            let state = app.state::<AppState>();
+            for id in ids {
+                let _ = engine::force_download_episode(&app, &state, id, false).await;
+            }
+        });
+    }
+    Ok(count)
 }
 
 #[tauri::command]

@@ -1,7 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-export type EpisodeStatus = "pending" | "found" | "downloading" | "available" | "error" | "deleted";
+/** "ready": fonte achada, esperando ser aberta no player (anime em modo Streaming). */
+export type EpisodeStatus = "pending" | "found" | "ready" | "downloading" | "available" | "error" | "deleted";
 
 export interface Episode {
   id: number;
@@ -85,6 +86,29 @@ export async function switchEpisodeSource(episodeId: number, sourceItemId: strin
 }
 
 /** true = achou e iniciou download; false = nenhum candidato dessa vez. */
+/** Busca e começa todos os episódios que faltam da temporada (dentro do
+ * intervalo escolhido). Roda em segundo plano; devolve quantos entraram. */
+export async function downloadMissingEpisodes(watchId: number): Promise<number> {
+  return invoke<number>("download_missing_episodes", { watchId });
+}
+
+/** URL pra assistir enquanto baixa (servidor local do Torii, ver
+ * src-tauri/src/stream_server.rs). Só pra episódio baixando. */
+export async function episodeStreamUrl(episodeId: number): Promise<string> {
+  return invoke<string>("episode_stream_url", { episodeId });
+}
+
+/** Começa o download se precisar (anime em modo Streaming) e devolve a URL
+ * do stream local. Pode levar alguns segundos: busca a fonte e conecta nos peers. */
+export async function episodeStreamStart(episodeId: number): Promise<string> {
+  return invoke<string>("episode_stream_start", { episodeId });
+}
+
+/** Modo Streaming: começa a baixar o episódio seguinte (chamado na metade do atual). */
+export async function episodePrefetchNext(watchId: number, episodeNumber: number): Promise<void> {
+  return invoke<void>("episode_prefetch_next", { watchId, episodeNumber });
+}
+
 export async function forceCheckEpisode(episodeId: number): Promise<boolean> {
   return invoke<boolean>("force_check_episode", { episodeId });
 }
