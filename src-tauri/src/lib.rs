@@ -92,19 +92,25 @@ fn spawn_notification_window(app: &tauri::App) -> tauri::Result<()> {
 /// responder a clique). Existindo a vida toda, a página do player só
 /// reposiciona ela (`player_set_video_area`), nunca cria/destrói.
 fn spawn_player_overlay_window(app: &tauri::App, main: &tauri::WebviewWindow) -> tauri::Result<()> {
-    WebviewWindowBuilder::new(app, "player-overlay", WebviewUrl::App("index.html#/player-overlay".into()))
+    let builder = WebviewWindowBuilder::new(app, "player-overlay", WebviewUrl::App("index.html#/player-overlay".into()))
         .title("")
         .decorations(false)
         .transparent(true)
         .shadow(false)
         .skip_taskbar(true)
         .resizable(false)
-        .visible(true)
+        // Linux: começa oculta (ver `commands::player::hide_overlay`).
+        .visible(cfg!(windows))
         .focused(false)
         .inner_size(1.0, 1.0)
-        .position(-2000.0, -2000.0)
-        .owner(main)?
-        .build()?;
+        .position(-2000.0, -2000.0);
+    // Windows: janela "owned" (fica acima da principal sem ser topmost).
+    // Linux: transient da principal — mesmo efeito pelo gerenciador de janelas.
+    #[cfg(windows)]
+    let builder = builder.owner(main)?;
+    #[cfg(not(windows))]
+    let builder = builder.parent(main)?;
+    builder.build()?;
     Ok(())
 }
 
@@ -116,6 +122,12 @@ fn greet(name: &str) -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // O vídeo é uma janela X11 embutida (ver `player::window`) — no Wayland
+    // isso não existe, então roda pelo XWayland.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("GDK_BACKEND").is_none() {
+        std::env::set_var("GDK_BACKEND", "x11");
+    }
     tauri::Builder::default()
         // Tem que ser o primeiro plugin registrado (recomendação da própria
         // doc do Tauri) pra funcionar direito no Windows. Segunda instância
@@ -300,7 +312,7 @@ pub fn run() {
                                 // isso ficava flutuando sobre a área de
                                 // trabalho com o app na bandeja (bug real).
                                 if let Some(overlay) = app.get_webview_window("player-overlay") {
-                                    let _ = overlay.set_position(PhysicalPosition::new(-32000, -32000));
+                                    commands::player::hide_overlay(&overlay);
                                 }
                             }
                         });
@@ -319,7 +331,7 @@ pub fn run() {
                         tauri::async_runtime::spawn(async move {
                             if window_clone.is_minimized().unwrap_or(false) {
                                 if let Some(overlay) = app.get_webview_window("player-overlay") {
-                                    let _ = overlay.set_position(PhysicalPosition::new(-32000, -32000));
+                                    commands::player::hide_overlay(&overlay);
                                 }
                             }
                         });
@@ -330,6 +342,13 @@ pub fn run() {
                 // Best-effort de propósito: se a DLL vendorizada faltar ou
                 // o load falhar, loga e segue sem player em vez de derrubar
                 // o app inteiro (ver `player::PlayerState`).
+                #[cfg(target_os = "linux")]
+                match player::media_session::MediaSession::new(app.handle()) {
+                    Ok(session) => {
+                        *app.state::<player::PlayerState>().media_session.lock().unwrap() = Some(session);
+                    }
+                    Err(e) => eprintln!("[player] controle de mídia (MPRIS) indisponível: {e}"),
+                }
                 #[cfg(windows)]
                 if let Ok(main_hwnd) = window.hwnd() {
                     match player::media_session::MediaSession::new(app.handle(), main_hwnd) {
@@ -340,22 +359,21 @@ pub fn run() {
                     }
                 }
 
-                #[cfg(windows)]
-                match window.hwnd() {
-                    Ok(main_hwnd) => match player::window::create_child(main_hwnd) {
-                        Ok(child_hwnd) => match player::PlayerEngine::new(child_hwnd) {
+                match player::window::main_surface(&window) {
+                    Some(main_surface) => match player::window::create_child(main_surface) {
+                        Ok(child) => match player::PlayerEngine::new(child) {
                             Ok(engine) => {
                                 let state = app.state::<player::PlayerState>();
                                 state
                                     .video_hwnd
-                                    .store(child_hwnd.0 as isize, std::sync::atomic::Ordering::Relaxed);
+                                    .store(player::window::to_raw(child), std::sync::atomic::Ordering::Relaxed);
                                 *state.engine.lock().unwrap() = Some(engine);
                             }
                             Err(e) => eprintln!("[player] falha ao iniciar libvlc: {e}"),
                         },
-                        Err(e) => eprintln!("[player] falha ao criar child window: {e:?}"),
+                        Err(e) => eprintln!("[player] falha ao criar child window: {e}"),
                     },
-                    Err(e) => eprintln!("[player] falha ao obter hwnd da janela principal: {e}"),
+                    None => eprintln!("[player] janela principal sem handle nativo (Wayland puro?)"),
                 }
 
                 if let Err(e) = spawn_player_overlay_window(app, &window) {

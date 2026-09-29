@@ -384,8 +384,8 @@ const en: Translation = {
     },
     general: {
       behavior: "Behavior",
-      autostart: "Launch with Windows",
-      autostartHint: "Starts Torii minimized to the tray when Windows starts",
+      autostart: "Launch at startup",
+      autostartHint: "Starts Torii minimized to the tray when your computer starts",
       closeAction: "When closing the window",
       closeActionHint:
         "Minimizing to the tray keeps Torii running in the background, finding and downloading new episodes. Quitting closes the app completely.",
@@ -393,7 +393,7 @@ const en: Translation = {
       closeQuit: "Quit the app",
       language: "Language",
       languageHint: "Interface language",
-      languageAuto: "Automatic (Windows)",
+      languageAuto: "Automatic (system)",
       appearance: "Appearance",
       theme: "Theme",
       themeHint: "Torii uses a fixed dark theme for now",
@@ -418,7 +418,7 @@ const en: Translation = {
     playback: {
       player: "Player",
       playerHint:
-        "The native player plays inside Torii, with intro skipping, preferred languages and resume. The external one opens the episode in the default Windows player.",
+        "The native player plays inside Torii, with intro skipping, preferred languages and resume. The external one opens the episode in the system's default player.",
       native: "Native",
       external: "External",
       ambientGroup: "Visuals",

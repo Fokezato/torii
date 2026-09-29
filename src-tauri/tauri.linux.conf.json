@@ -1,0 +1,17 @@
+{
+  "bundle": {
+    "targets": ["appimage", "deb", "rpm"],
+    "category": "Video",
+    "shortDescription": "Your anime hub",
+    "linux": {
+      "deb": {
+        "depends": ["vlc"],
+        "recommends": ["ffmpeg"]
+      },
+      "rpm": {
+        "depends": ["vlc"],
+        "recommends": ["ffmpeg"]
+      }
+    }
+  }
+}

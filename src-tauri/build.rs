@@ -12,6 +12,10 @@ fn main() {
 /// (skip se já igual) e funciona em dev e release sem depender do sistema
 /// de resources do Tauri, que só se aplica no instalador empacotado.
 fn copy_vlc_runtime() {
+    // Linux usa o libVLC do sistema; o vendorizado é só do Windows.
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
+        return;
+    }
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let src = Path::new(&manifest_dir).join("vendor").join("vlc");
     if !src.exists() {

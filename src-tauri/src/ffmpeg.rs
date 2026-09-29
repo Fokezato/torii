@@ -1,3 +1,5 @@
+// Linux usa o ffmpeg do sistema: o download/extração só existe no Windows.
+#![cfg_attr(not(windows), allow(dead_code, unused_imports))]
 //! ffmpeg/ffprobe baixados SOB DEMANDA (só quando o usuário liga uma opção
 //! que precisa deles — ver `audio_strip`), em vez de irem no instalador
 //! (~80MB a mais pra quem nunca usa). Build LGPL "shared" do BtbN
@@ -41,7 +43,10 @@ fn tools_dir(app: &AppHandle) -> Result<PathBuf, String> {
 
 fn paths_in(dir: &Path) -> FfmpegPaths {
     let bin = dir.join("bin");
-    FfmpegPaths { ffmpeg: bin.join("ffmpeg.exe"), ffprobe: bin.join("ffprobe.exe") }
+    FfmpegPaths {
+        ffmpeg: bin.join(format!("ffmpeg{}", std::env::consts::EXE_SUFFIX)),
+        ffprobe: bin.join(format!("ffprobe{}", std::env::consts::EXE_SUFFIX)),
+    }
 }
 
 /// Arquivo ao lado do bin com o nome do pacote instalado — trocar
@@ -49,6 +54,27 @@ fn paths_in(dir: &Path) -> FfmpegPaths {
 /// em vez de seguir usando a versão errada.
 const VERSION_FILE: &str = "installed.txt";
 
+/// Linux: ffmpeg/ffprobe do sistema (gerenciador de pacotes), pelo PATH.
+#[cfg(not(windows))]
+fn system_ffmpeg() -> Option<FfmpegPaths> {
+    let found = |name: &str| {
+        std::process::Command::new(name)
+            .arg("-version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+    };
+    (found("ffmpeg") && found("ffprobe"))
+        .then(|| FfmpegPaths { ffmpeg: PathBuf::from("ffmpeg"), ffprobe: PathBuf::from("ffprobe") })
+}
+
+#[cfg(not(windows))]
+pub fn installed(_app: &AppHandle) -> Option<FfmpegPaths> {
+    system_ffmpeg()
+}
+
+#[cfg(windows)]
 pub fn installed(app: &AppHandle) -> Option<FfmpegPaths> {
     let dir = tools_dir(app).ok()?;
     let version = std::fs::read_to_string(dir.join(VERSION_FILE)).ok()?;
@@ -76,17 +102,29 @@ pub async fn ensure_installed(app: &AppHandle, http: &reqwest::Client) -> Result
     if let Some(paths) = installed(app) {
         return Ok(paths);
     }
-    set_status(|s| {
-        s.downloading = true;
-        s.progress = 0.0;
-        s.error = None;
-    });
-    let result = download_and_extract(app, http).await;
-    set_status(|s| {
-        s.downloading = false;
-        s.error = result.as_ref().err().cloned();
-    });
-    result
+    // Linux: sem download — o ffmpeg vem do sistema.
+    #[cfg(not(windows))]
+    {
+        let _ = http;
+        Err(tr!(
+            "ffmpeg não encontrado — instale pelo gerenciador de pacotes (ffmpeg e ffprobe)",
+            "ffmpeg not found — install it with your package manager (ffmpeg and ffprobe)"
+        ))
+    }
+    #[cfg(windows)]
+    {
+        set_status(|s| {
+            s.downloading = true;
+            s.progress = 0.0;
+            s.error = None;
+        });
+        let result = download_and_extract(app, http).await;
+        set_status(|s| {
+            s.downloading = false;
+            s.error = result.as_ref().err().cloned();
+        });
+        result
+    }
 }
 
 async fn download_and_extract(app: &AppHandle, http: &reqwest::Client) -> Result<FfmpegPaths, String> {
@@ -180,6 +218,7 @@ fn extract_bin(zip_path: &Path, dir: &Path) -> Result<(), String> {
 /// Processo do ffmpeg/ffprobe sem janela de console e com prioridade
 /// abaixo do normal — roda em segundo plano sem disputar CPU com o player.
 pub fn command(program: &Path) -> std::process::Command {
+    #[cfg_attr(not(windows), allow(unused_mut))]
     let mut cmd = std::process::Command::new(program);
     #[cfg(windows)]
     {

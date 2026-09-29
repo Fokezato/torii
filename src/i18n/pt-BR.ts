@@ -386,8 +386,8 @@ const ptBR = {
     },
     general: {
       behavior: "Comportamento",
-      autostart: "Abrir com o Windows",
-      autostartHint: "Inicia o Torii minimizado na bandeja junto com o Windows",
+      autostart: "Abrir com o sistema",
+      autostartHint: "Inicia o Torii minimizado na bandeja junto com o sistema",
       closeAction: "Ao clicar em fechar",
       closeActionHint:
         "Minimizar pra bandeja deixa o Torii rodando em segundo plano, buscando e baixando episódios novos. Fechar encerra o app de vez.",
@@ -395,7 +395,7 @@ const ptBR = {
       closeQuit: "Fechar o app",
       language: "Idioma",
       languageHint: "Idioma da interface",
-      languageAuto: "Automático (Windows)",
+      languageAuto: "Automático (sistema)",
       appearance: "Aparência",
       theme: "Tema",
       themeHint: "Torii usa tema escuro fixo por enquanto",
@@ -420,7 +420,7 @@ const ptBR = {
     playback: {
       player: "Player",
       playerHint:
-        "O nativo toca dentro do Torii, com pular abertura, idioma preferido e continuar de onde parou. O externo abre o episódio no player padrão do Windows.",
+        "O nativo toca dentro do Torii, com pular abertura, idioma preferido e continuar de onde parou. O externo abre o episódio no player padrão do sistema.",
       native: "Nativo",
       external: "Externo",
       ambientGroup: "Visual",
