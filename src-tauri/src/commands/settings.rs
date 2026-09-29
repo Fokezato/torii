@@ -14,6 +14,9 @@ pub async fn update_settings(
     values: HashMap<String, String>,
 ) -> Result<(), AppError> {
     db::settings::update(&state.db, &values).await?;
+    if let (Some(on), Some(presence)) = (values.get("discord_presence"), app.try_state::<crate::discord::Presence>()) {
+        presence.set_enabled(on != "0");
+    }
     if values.get("detect_segments").map(String::as_str) == Some("1") {
         crate::intro_detect::spawn_pending(&app);
     }

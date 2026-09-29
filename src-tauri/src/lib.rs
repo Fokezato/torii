@@ -5,24 +5,28 @@ mod audio_strip;
 mod clean_filename;
 mod commands;
 mod db;
+mod discord;
 mod downscale;
 mod engine;
 mod error;
 mod ffmpeg;
 mod intro_detect;
 mod media_file;
+mod mkv_fix;
+mod subtitles;
 mod postprocess;
 mod jellyfin;
 mod notify;
 mod player;
 mod sources;
 mod state;
+mod stream_server;
 mod torrent_engine;
 
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder, WindowEvent,
+    Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
 
 const NOTIFICATION_WINDOW_SIZE: (f64, f64) = (360.0, 96.0);
@@ -133,6 +137,11 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        // Atualização automática: lê o latest.json da última release no
+        // GitHub (sem servidor próprio) e só aceita pacote assinado com a
+        // chave do Torii (chave pública no tauri.conf.json).
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--hidden"]),
@@ -168,12 +177,26 @@ pub fn run() {
                 torrent,
             });
             app.manage(player::PlayerState::default());
+            app.manage(discord::Presence::start());
+            // Servidor local do "assistir enquanto baixa".
+            match tauri::async_runtime::block_on(stream_server::start(app.handle().clone())) {
+                Ok(server) => {
+                    app.manage(server);
+                }
+                Err(e) => eprintln!("[stream] não iniciou: {e}"),
+            }
 
             tauri::async_runtime::spawn(engine::backfill_placeholder_episodes(app.handle().clone()));
             tauri::async_runtime::spawn(engine::backfill_series(app.handle().clone()));
             engine::spawn_background_loop(app.handle().clone());
             engine::spawn_download_reconciler(app.handle().clone());
             tauri::async_runtime::spawn(engine::resume_pending_downloads(app.handle().clone()));
+            {
+                let app = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    engine::repair_missing_item_paths(&app.state::<state::AppState>()).await;
+                });
+            }
             tauri::async_runtime::spawn(engine::resync_jellyfin_library(app.handle().clone()));
             // Detecção de abertura/encerramento dos episódios já baixados —
             // espera o boot assentar antes de ocupar disco/CPU.
@@ -257,6 +280,21 @@ pub fn run() {
                             if close_action == "quit" {
                                 app.exit(0);
                             } else {
+                                // Fechar com o player aberto = encerra o
+                                // player (senão o som seguia na bandeja) e a
+                                // interface volta pra Biblioteca. Na thread
+                                // PRINCIPAL: parar o libvlc fecha a janela do
+                                // vídeo, que é da thread principal — feito
+                                // daqui (thread de fundo) segurando o
+                                // `engine`, travava o app todo enquanto a
+                                // principal esperava o `engine` (bug real).
+                                let main_app = app.clone();
+                                let _ = app.run_on_main_thread(move || {
+                                    let state = main_app.state::<player::PlayerState>();
+                                    let _ = commands::player::player_stop(main_app.clone(), state.clone());
+                                    let _ = commands::player::player_set_visible(state, false);
+                                });
+                                let _ = app.emit_to("main", "app:window-hidden", ());
                                 let _ = window_clone.hide();
                                 // Overlay do player é janela própria — sem
                                 // isso ficava flutuando sobre a área de
@@ -307,7 +345,11 @@ pub fn run() {
                     Ok(main_hwnd) => match player::window::create_child(main_hwnd) {
                         Ok(child_hwnd) => match player::PlayerEngine::new(child_hwnd) {
                             Ok(engine) => {
-                                *app.state::<player::PlayerState>().engine.lock().unwrap() = Some(engine);
+                                let state = app.state::<player::PlayerState>();
+                                state
+                                    .video_hwnd
+                                    .store(child_hwnd.0 as isize, std::sync::atomic::Ordering::Relaxed);
+                                *state.engine.lock().unwrap() = Some(engine);
                             }
                             Err(e) => eprintln!("[player] falha ao iniciar libvlc: {e}"),
                         },
@@ -337,7 +379,7 @@ pub fn run() {
             commands::season::get_schedule,
             commands::watches::list_watches,
             commands::watches::create_watch,
-            commands::watches::delete_watch,
+            commands::watches::remove_watch,
             commands::watches::set_watch_active,
             commands::watches::set_watch_rating,
             commands::watches::set_watch_list_status,
@@ -353,6 +395,10 @@ pub fn run() {
             commands::episodes::resume_episode_download,
             commands::episodes::cancel_episode_download,
             commands::episodes::list_episode_sources,
+            commands::episodes::download_missing_episodes,
+            commands::episodes::episode_stream_url,
+            commands::episodes::episode_stream_start,
+            commands::episodes::episode_prefetch_next,
             commands::episodes::switch_episode_source,
             commands::episodes::force_check_episode,
             commands::player::player_open,
@@ -373,6 +419,8 @@ pub fn run() {
             commands::player::player_set_video_area,
             commands::player::player_get_skip_segments,
             commands::player::player_save_progress,
+            commands::player::player_ambient_frame,
+            commands::player::player_subtitle_cues,
             commands::tools::ffmpeg_status,
             commands::tools::ffmpeg_install,
             commands::tools::translate_text,

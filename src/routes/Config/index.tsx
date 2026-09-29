@@ -11,6 +11,7 @@ import { notify } from "@/lib/notify";
 import { listWatches } from "@/lib/watches";
 import { isAutostartEnabled, setAutostart } from "@/lib/autostart";
 import { getVersion } from "@tauri-apps/api/app";
+import { useUpdateStore } from "@/stores/update";
 import { ffmpegInstall, ffmpegStatus } from "@/lib/tools";
 import { IrreversibleToggle } from "@/components/shared/IrreversibleToggle";
 import {
@@ -287,6 +288,7 @@ export default function Config() {
   const sampleCover = watches?.find((w) => w.cover_url)?.cover_url;
 
   const { data: appVersion } = useQuery({ queryKey: ["app-version"], queryFn: getVersion, staleTime: Infinity });
+  const updater = useUpdateStore();
   const { data: autostartEnabled } = useQuery({
     queryKey: ["autostart"],
     queryFn: isAutostartEnabled,
@@ -429,6 +431,15 @@ export default function Config() {
               )}
 
               {active === "integracao" && (
+                <>
+                <SettingsGroup title="Discord">
+                  <SettingRow label={t("config.playback.discord")} description={t("config.playback.discordHint")}>
+                    <Switch
+                      checked={s.discord_presence !== "0"}
+                      onCheckedChange={(checked) => patch.mutate({ discord_presence: checked ? "1" : "0" })}
+                    />
+                  </SettingRow>
+                </SettingsGroup>
                 <SettingsGroup title="Jellyfin">
                   <SettingRow
                     label={t("config.jellyfin.enable")}
@@ -496,6 +507,7 @@ export default function Config() {
                     </>
                   )}
                 </SettingsGroup>
+                </>
               )}
 
               <AlertDialog open={confirmJellyfin} onOpenChange={setConfirmJellyfin}>
@@ -538,6 +550,18 @@ export default function Config() {
                           <SelectItem value="external">{t("config.playback.external")}</SelectItem>
                         </SelectContent>
                       </Select>
+                    </SettingRow>
+                  </SettingsGroup>
+
+                  <SettingsGroup title={t("config.playback.ambientGroup")}>
+                    <SettingRow
+                      label={t("config.playback.ambient")}
+                      description={t("config.playback.ambientHint")}
+                    >
+                      <Switch
+                        checked={s.player_ambient_light !== "0"}
+                        onCheckedChange={(checked) => patch.mutate({ player_ambient_light: checked ? "1" : "0" })}
+                      />
                     </SettingRow>
                   </SettingsGroup>
 
@@ -817,6 +841,35 @@ export default function Config() {
                   <SettingsGroup title="Torii">
                     <SettingRow label={t("config.about.version")}>
                       <span className="text-xs text-[#8A8F9C]">{appVersion ?? "…"}</span>
+                    </SettingRow>
+                    <SettingRow
+                      label={t("update.check")}
+                      description={
+                        updater.phase === "checking"
+                          ? t("update.checking")
+                          : updater.phase === "upToDate"
+                            ? t("update.upToDate")
+                            : updater.phase === "available" || updater.phase === "downloading"
+                              ? t("update.available", { version: updater.update?.version ?? "" })
+                              : updater.phase === "error"
+                                ? t("update.error")
+                                : undefined
+                      }
+                    >
+                      <button
+                        type="button"
+                        disabled={updater.phase === "checking" || updater.phase === "downloading"}
+                        onClick={() => updater.checkNow()}
+                        className="rounded-lg border border-[#33374A] px-3.5 py-2 text-xs font-semibold text-foreground transition-colors hover:bg-white/5 disabled:opacity-40"
+                      >
+                        {t("update.checkNow")}
+                      </button>
+                    </SettingRow>
+                    <SettingRow label={t("update.auto")} description={t("update.autoHint")}>
+                      <Switch
+                        checked={s.auto_update_check !== "0"}
+                        onCheckedChange={(checked) => patch.mutate({ auto_update_check: checked ? "1" : "0" })}
+                      />
                     </SettingRow>
                     <SettingRow label="Stack">
                       <span className="text-xs text-[#8A8F9C]">Tauri v2 · Rust · React</span>

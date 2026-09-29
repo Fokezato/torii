@@ -34,7 +34,11 @@ rustfft = "6"
 futures = "0.3"
 quick-xml = { version = "0.36", features = ["serialize"] }
 urlencoding = "2"
-tokio = { version = "1", features = ["time", "sync"] }
+tokio = { version = "1", features = ["time", "sync", "net", "io-util"] }
+# Servidor local do "assistir enquanto baixa" (ver src/stream_server.rs) —
+# já vinham como dependência do librqbit.
+axum = "0.8"
+tokio-util = { version = "0.7", features = ["io"] }
 librqbit = "9"
 anyhow = "1"
 tauri-plugin-autostart = "2.5.1"
@@ -45,9 +49,12 @@ base64 = "0.22"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 sha2 = "0.10"
 hex = "0.4"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+discord-rich-presence = "1.1.0"
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.61", features = [
+windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_UI_WindowsAndMessaging",
     "Win32_Graphics_Gdi",
