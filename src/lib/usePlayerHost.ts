@@ -9,7 +9,14 @@ import { playerSetVideoArea } from "@/lib/player";
 /// que a overlay emite ("voltar", "tela cheia"). Ao sair da página, some
 /// com o vídeo/overlay — a visibilidade é derivada da área no Rust (área
 /// fora da tela = oculto), ver `player_set_video_area`.
-export function usePlayerHost(slotRef: RefObject<HTMLDivElement | null>, onError?: (message: string) => void) {
+export function usePlayerHost(
+  slotRef: RefObject<HTMLDivElement | null>,
+  onError?: (message: string) => void,
+  /** Proporção largura/altura do vídeo (luz ambiente ligada): a HWND do
+   * vídeo fica só do tamanho da imagem, centralizada, e o espaço em volta
+   * sobra pro brilho. `null` = vídeo ocupa a área toda. */
+  videoAspectRef?: RefObject<number | null>,
+) {
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -74,7 +81,14 @@ export function usePlayerHost(slotRef: RefObject<HTMLDivElement | null>, onError
       const y = Math.round(rect.top * dpr);
       const width = Math.round(rect.width * dpr);
       const height = Math.round(rect.height * dpr);
-      playerSetVideoArea(x, y, width, height, winPos.x + x, winPos.y + y).catch((e) => onError?.(String(e)));
+      const aspect = videoAspectRef?.current;
+      let video: [number, number, number, number] | undefined;
+      if (aspect && width > 1 && height > 1) {
+        const fitW = Math.min(width, Math.round(height * aspect));
+        const fitH = Math.min(height, Math.round(width / aspect));
+        video = [x + Math.round((width - fitW) / 2), y + Math.round((height - fitH) / 2), fitW, fitH];
+      }
+      playerSetVideoArea(x, y, width, height, winPos.x + x, winPos.y + y, video).catch((e) => onError?.(String(e)));
     };
 
     reportBounds();

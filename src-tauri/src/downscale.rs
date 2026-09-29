@@ -115,6 +115,7 @@ pub fn downscale(
     cmd.args(["-map", "0", "-c", "copy"]);
     cmd.args(encoder.args());
     cmd.arg("-filter:v:0").arg(format!("scale={max_width}:-2:flags=lanczos,format={}", encoder.pixel_format()));
+    cmd.args(["-write_crc32", "0"]);
     cmd.arg(media_file::temp_path(file));
     media_file::run_and_replace(&paths.ffprobe, cmd, file, &original)
 }

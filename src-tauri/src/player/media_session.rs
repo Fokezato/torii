@@ -90,10 +90,16 @@ impl MediaSession {
     }
 }
 
+/// A tecla chega por uma thread do Windows — o libvlc é acionado na thread
+/// principal (dona da janela do vídeo), igual aos comandos do player, pra
+/// não travar esperando o `engine` enquanto a principal espera também.
 fn set_paused_from_key(app: &AppHandle, paused: bool) {
-    let state = app.state::<super::PlayerState>();
-    if let Some(engine) = state.engine.lock().unwrap().as_ref() {
-        engine.set_paused(paused);
-    }
-    state.with_media_session(|s| s.set_playing(!paused));
+    let main_app = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let state = main_app.state::<super::PlayerState>();
+        if let Some(engine) = state.engine.lock().unwrap().as_ref() {
+            engine.set_paused(paused);
+        }
+        state.with_media_session(|s| s.set_playing(!paused));
+    });
 }

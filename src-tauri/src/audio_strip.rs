@@ -79,6 +79,7 @@ pub fn strip(paths: &ffmpeg::FfmpegPaths, file: &Path, preferred: &[String]) -> 
     if !kept.iter().any(|s| s.disposition.get("default") == Some(&1)) {
         cmd.args(["-disposition:a:0", "default"]);
     }
+    cmd.args(["-write_crc32", "0"]);
     cmd.arg(media_file::temp_path(file));
     media_file::run_and_replace(&paths.ffprobe, cmd, file, &original)
 }

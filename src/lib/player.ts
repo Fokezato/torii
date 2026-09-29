@@ -159,8 +159,47 @@ export async function playerSetVideoArea(
   height: number,
   overlayX: number,
   overlayY: number,
+  /** Retângulo só da imagem [x, y, w, h] (luz ambiente) — sem ele o vídeo
+   * ocupa a área toda. Os controles cobrem sempre a área toda. */
+  video?: [number, number, number, number],
 ): Promise<void> {
-  return invoke("player_set_video_area", { x, y, width, height, overlayX, overlayY });
+  return invoke("player_set_video_area", { x, y, width, height, overlayX, overlayY, video: video ?? null });
+}
+
+export interface SubtitleCue {
+  start_ms: number;
+  end_ms: number;
+  text: string;
+  /** Letreiro/placa/karaokê — não desenhado no modo personalizado. */
+  sign: boolean;
+  italic: boolean;
+  /** Fala no topo da tela. */
+  top: boolean;
+}
+
+/** Falas da `ordinal`-ésima faixa de legenda do arquivo (0 = primeira),
+ * extraídas com ffmpeg — base da legenda personalizada. */
+export async function playerSubtitleCues(path: string, ordinal: number): Promise<SubtitleCue[]> {
+  return invoke("player_subtitle_cues", { path, ordinal });
+}
+
+export interface AmbientFrame {
+  /** Amostra de cores do vídeo (RGBA). */
+  pixels: ImageData;
+  /** Tamanho real do vídeo (proporção pro encaixe). */
+  videoWidth: number;
+  videoHeight: number;
+}
+
+/** Cores atuais do vídeo pra luz ambiente; `null` sem vídeo na tela. */
+export async function playerAmbientFrame(): Promise<AmbientFrame | null> {
+  const buffer = await invoke<ArrayBuffer>("player_ambient_frame");
+  if (!buffer || buffer.byteLength < 16) return null;
+  const header = new DataView(buffer, 0, 16);
+  const [width, height, videoWidth, videoHeight] = [0, 4, 8, 12].map((o) => header.getUint32(o, true));
+  if (width === 0 || height === 0 || buffer.byteLength < 16 + width * height * 4) return null;
+  const rgba = new Uint8ClampedArray(buffer, 16, width * height * 4);
+  return { pixels: new ImageData(rgba, width, height), videoWidth, videoHeight };
 }
 
 /** Salva onde parou; `watched` marca o episódio como assistido (nunca

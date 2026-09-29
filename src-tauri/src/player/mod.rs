@@ -131,6 +131,16 @@ impl PlayerEngine {
         self.hwnd
     }
 
+    /// Tamanho real do vídeo tocando (sem as faixas pretas). `None` antes
+    /// do vídeo começar. Chamar só da thread principal (ver
+    /// `PlayerState::video_size`).
+    pub fn video_size(&self) -> Option<(u32, u32)> {
+        let (mut w, mut h) = (0u32, 0u32);
+        // SAFETY: player válido; ponteiros pra variáveis locais.
+        let result = unsafe { (self.api.video_get_size)(self.player, 0, &mut w, &mut h) };
+        (result == 0 && w > 0 && h > 0).then_some((w, h))
+    }
+
     pub fn tools(&self) -> Option<media_tools::MediaTools> {
         self.tools
     }
@@ -283,6 +293,14 @@ pub struct PlayerState {
     /// `None` se não deu pra registrar — o player funciona igual sem.
     #[cfg(windows)]
     pub media_session: std::sync::Mutex<Option<media_session::MediaSession>>,
+    /// Tamanho real do vídeo (largura << 32 | altura; 0 = sem vídeo) e HWND
+    /// do vídeo, pra luz ambiente ler SEM tocar no libvlc nem no `engine`.
+    /// Chamar o libvlc de outra thread segurando o `engine` travava o app:
+    /// o vídeo espera a thread principal, que esperava o `engine` (visto na
+    /// prática — app "Não respondendo" no alt+tab). Quem atualiza é
+    /// `player_snapshot`, que já roda na thread principal.
+    pub video_size: std::sync::atomic::AtomicU64,
+    pub video_hwnd: std::sync::atomic::AtomicIsize,
 }
 
 impl Default for PlayerState {
@@ -290,6 +308,8 @@ impl Default for PlayerState {
         Self {
             engine: std::sync::Mutex::new(None),
             now_playing: std::sync::Mutex::new(NowPlaying::default()),
+            video_size: std::sync::atomic::AtomicU64::new(0),
+            video_hwnd: std::sync::atomic::AtomicIsize::new(0),
             #[cfg(windows)]
             media_session: std::sync::Mutex::new(None),
         }
@@ -304,3 +324,4 @@ impl PlayerState {
         }
     }
 }
+

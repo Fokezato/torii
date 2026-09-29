@@ -63,6 +63,8 @@ type FnVideoSetCallbacks = unsafe extern "C" fn(
     *mut c_void,
 );
 type FnVideoSetFormat = unsafe extern "C" fn(*mut LibvlcMediaPlayer, *const c_char, u32, u32, u32);
+/// (player, nº do vídeo, &largura, &altura) — 0 = ok.
+type FnVideoGetSize = unsafe extern "C" fn(*mut LibvlcMediaPlayer, u32, *mut u32, *mut u32) -> c_int;
 
 /// `libvlc_media_track_t` (libvlc 3.x). `u` é a union de ponteiros
 /// (áudio/vídeo/legenda) — só lida como vídeo quando `i_type == 1`.
@@ -140,6 +142,7 @@ pub struct VlcApi {
     pub media_tracks_release: FnMediaTracksRelease,
     pub video_set_callbacks: FnVideoSetCallbacks,
     pub video_set_format: FnVideoSetFormat,
+    pub video_get_size: FnVideoGetSize,
 }
 
 macro_rules! sym {
@@ -188,6 +191,7 @@ pub unsafe fn load(lib: &Library) -> Result<VlcApi, String> {
         media_tracks_release: sym!(lib, b"libvlc_media_tracks_release\0"),
         video_set_callbacks: sym!(lib, b"libvlc_video_set_callbacks\0"),
         video_set_format: sym!(lib, b"libvlc_video_set_format\0"),
+        video_get_size: sym!(lib, b"libvlc_video_get_size\0"),
     })
 }
 

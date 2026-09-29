@@ -150,3 +150,70 @@ pub fn ensure_above(overlay: HWND, main: HWND) {
         let _ = SetWindowPos(overlay, Some(insert_after), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
 }
+
+/// Cores do vídeo pra luz ambiente: copia a área da tela onde a HWND do
+/// vídeo está, já reduzida (`width` px, altura na proporção), como RGBA.
+/// Lê o que está composto na tela (DWM) em vez de pedir foto ao libvlc — a
+/// captura do libvlc fazia a legenda piscar e prendia o player esperando o
+/// quadro. Inclui o que estiver por cima (controles), o que no brilho todo
+/// borrado não faz diferença. `None` com a janela oculta/minúscula.
+pub fn capture_colors(hwnd: HWND, width: u32) -> Option<(u32, u32, Vec<u8>)> {
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::Graphics::Gdi::{
+        CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC, GetDIBits, ReleaseDC, SelectObject,
+        SetStretchBltMode, StretchBlt, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HALFTONE, SRCCOPY,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{GetWindowRect, IsWindowVisible};
+
+    unsafe {
+        if !IsWindowVisible(hwnd).as_bool() {
+            return None;
+        }
+        let mut rect = RECT::default();
+        GetWindowRect(hwnd, &mut rect).ok()?;
+        let (src_w, src_h) = (rect.right - rect.left, rect.bottom - rect.top);
+        if src_w < 16 || src_h < 16 {
+            return None;
+        }
+        let out_w = width.max(8) as i32;
+        let out_h = ((out_w as i64 * src_h as i64) / src_w as i64).max(4) as i32;
+
+        let screen = GetDC(None);
+        let mem = CreateCompatibleDC(Some(screen));
+        let bitmap = CreateCompatibleBitmap(screen, out_w, out_h);
+        let old = SelectObject(mem, bitmap.into());
+        SetStretchBltMode(mem, HALFTONE);
+        let copied = StretchBlt(mem, 0, 0, out_w, out_h, Some(screen), rect.left, rect.top, src_w, src_h, SRCCOPY).as_bool();
+
+        let mut info = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: out_w,
+                // Negativo = linhas de cima pra baixo.
+                biHeight: -out_h,
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut pixels = vec![0u8; (out_w * out_h * 4) as usize];
+        let lines = GetDIBits(mem, bitmap, 0, out_h as u32, Some(pixels.as_mut_ptr().cast()), &mut info, DIB_RGB_COLORS);
+
+        SelectObject(mem, old);
+        let _ = DeleteObject(bitmap.into());
+        let _ = DeleteDC(mem);
+        ReleaseDC(None, screen);
+
+        if !copied || lines == 0 {
+            return None;
+        }
+        // BGRA → RGBA, alfa cheio.
+        for px in pixels.chunks_exact_mut(4) {
+            px.swap(0, 2);
+            px[3] = 255;
+        }
+        Some((out_w as u32, out_h as u32, pixels))
+    }
+}

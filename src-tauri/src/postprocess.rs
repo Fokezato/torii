@@ -39,8 +39,51 @@ where
         .unwrap_or_else(|e| Err(ProcessError::Permanent(e.to_string())))
 }
 
+/// MKV gravado pelo ffmpeg abre devagar no VLC (ver `mkv_fix`): regrava
+/// sem o CRC32 do índice. Conferir não precisa de ffmpeg (lê o cabeçalho);
+/// só baixa o ffmpeg se tiver arquivo pra corrigir.
+async fn fix_containers(app: &AppHandle, playing_path: Option<&str>) {
+    let state = app.state::<AppState>();
+    let Ok(episodes) = db::episodes::list_container_pending(&state.db).await else { return };
+    let mut paths: Option<ffmpeg::FfmpegPaths> = None;
+    for ep in episodes {
+        let Some(path) = ep.item_path.clone() else { continue };
+        if playing_path == Some(path.as_str()) || playing_path.and_then(crate::stream_server::episode_of_url) == Some(ep.id) {
+            continue;
+        }
+        let file = PathBuf::from(&path);
+        let needs_fix = {
+            let file = file.clone();
+            tauri::async_runtime::spawn_blocking(move || crate::mkv_fix::written_by_ffmpeg(&file))
+                .await
+                .unwrap_or(false)
+        };
+        if !needs_fix {
+            let _ = db::episodes::mark_container_fixed(&state.db, ep.id).await;
+            continue;
+        }
+        if paths.is_none() {
+            match ffmpeg::ensure_installed(app, &state.http).await {
+                Ok(p) => paths = Some(p),
+                Err(_) => return,
+            }
+        }
+        let p = paths.clone().unwrap();
+        // Arquivo vai mudar: sai do motor de torrent antes, senão ele
+        // "consertaria" (rebaixaria) os pedaços que não batem mais.
+        let _ = state.torrent.remove(ep.id, false).await;
+        match run_blocking(move || crate::mkv_fix::fix(&p, &file)).await {
+            Ok(_) | Err(ProcessError::Permanent(_)) => {
+                let _ = db::episodes::mark_container_fixed(&state.db, ep.id).await;
+            }
+            Err(ProcessError::Retry) => {}
+        }
+    }
+}
+
 async fn process_pending(app: &AppHandle, playing_path: Option<String>) {
     let state = app.state::<AppState>();
+    fix_containers(app, playing_path.as_deref()).await;
     let Ok(settings) = db::settings::get_all(&state.db).await else { return };
 
     // Regra: ligado na Config = vale pra TODOS os animes; desligado na
@@ -72,7 +115,9 @@ async fn process_pending(app: &AppHandle, playing_path: Option<String>) {
 
     for ep in episodes {
         let Some(path) = ep.item_path.clone() else { continue };
-        if playing_path.as_deref() == Some(path.as_str()) {
+        if playing_path.as_deref() == Some(path.as_str())
+            || playing_path.as_deref().and_then(crate::stream_server::episode_of_url) == Some(ep.id)
+        {
             continue;
         }
         let need_audio = strip_for.contains(&ep.watch_id) && ep.audio_processed_at.is_none();
