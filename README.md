@@ -3,15 +3,15 @@
 </p>
 
 <p align="center">
-  <b>Your anime hub for Windows.</b><br>
-  Follow the seasons you watch, get new episodes downloaded automatically<br>
+  <b>Your anime hub.</b><br>
+  Follow the seasons you watch, get new episodes downloaded automatically, or stream them on demand,<br>
   and watch everything in a built-in player. No torrent client or external player needed.
 </p>
 
 <p align="center">
   <a href="https://github.com/Fokezato/torii/releases"><img src="https://img.shields.io/github/v/release/Fokezato/torii?include_prereleases&label=release&color=FF6A45" alt="Latest release"></a>
   <a href="https://github.com/Fokezato/torii/releases"><img src="https://img.shields.io/github/downloads/Fokezato/torii/total?color=FF6A45" alt="Downloads"></a>
-  <img src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D6?logo=windows&logoColor=white" alt="Platform: Windows 10 | 11">
+  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%26%20Android%20soon-0078D6" alt="Platform: Windows | Linux &amp; Android soon">
   <img src="https://img.shields.io/badge/built%20with-Tauri%202-24C8DB?logo=tauri&logoColor=white" alt="Built with Tauri 2">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-6C7180" alt="License: PolyForm Noncommercial"></a>
 </p>
@@ -25,18 +25,24 @@
 </p>
 
 > [!NOTE]
-> Torii is in **beta**. The interface is available in English and Brazilian Portuguese.
+> Torii is in **beta** and may still have bugs or rough edges. If you run into a problem, please [open an issue](https://github.com/Fokezato/torii/issues).
+>
+> Available for Windows today; Linux and Android versions are planned.
 
 ## ✨ Features
 
 - 📚 **Catalog and search.** Browse the current season and trending shows, or search any title, powered by AniList.
 - 🗂️ **Organized library.** Every anime in one place, with all of its seasons grouped together.
-- ⬇️ **Automatic downloads.** New episodes are found and downloaded as soon as they are released, matching your preferred quality and language.
+- ⬇️ **Automatic downloads.** New episodes are found and downloaded as soon as they are released, matching your preferred quality and language. Stalled downloads switch to another source on their own.
+- 📡 **Streaming mode.** Nothing is downloaded ahead of time: press play and the episode starts right away while it downloads. The next episode is prepared halfway through, and watched episodes are deleted afterwards. Episodes that are still downloading can also be watched right away.
 - ▶️ **Native video player.**
-  - Lightweight and optimized.
-  - Automatically skips openings, endings and recaps.
-- 💾 **Storage management** (optional, beta). Options to save disk space.
+  - Lightweight and optimized, with resume and next episode.
+  - Skips openings, endings and recaps, using AniSkip, the file's chapters or audio matching between episodes.
+  - Ambient light around the video and customizable subtitles.
+- 💾 **Storage management** (optional, beta). Delete episodes after watching, remove unused audio tracks or reduce resolution to save disk space.
 - 🎬 **Jellyfin integration** (optional). Sends downloaded episodes straight to your Jellyfin library folder.
+- 🎮 **Discord Rich Presence** (optional). Shows what you're watching on your Discord profile.
+- 🔄 **Automatic updates.** New versions are offered inside the app.
 
 ## 💻 Requirements
 
@@ -48,6 +54,8 @@
 
 1. Download **`Torii_x.y.z_x64-setup.exe`** from the [latest release](https://github.com/Fokezato/torii/releases).
 2. Run the installer.
+
+From version 0.4.0 on, Torii updates itself: when a new version is released, a banner inside the app offers to install it.
 
 > [!IMPORTANT]
 > The installer is not code-signed yet, so Windows shows a blue **"Windows protected your PC"** screen. Click **More info → Run anyway**.
@@ -71,8 +79,9 @@ npm run tauri build   # build the installer (src-tauri/target/release/bundle)
 | Component | Used for | License |
 | --- | --- | --- |
 | [libVLC](https://www.videolan.org/vlc/libvlc.html) (VideoLAN) | Video playback. Shipped in `src-tauri/vendor/vlc` with its original license, loaded dynamically and unmodified. | LGPL-2.1 |
-| [FFmpeg](https://github.com/BtbN/FFmpeg-Builds) (BtbN LGPL builds) | File size reduction options. **Not** shipped: downloaded on demand when you enable one of them, and verified against the published SHA-256. | LGPL |
-| [librqbit](https://github.com/ikatson/rqbit) | Torrent engine | Apache-2.0 |
+| [FFmpeg](https://github.com/BtbN/FFmpeg-Builds) (BtbN LGPL builds) | File size reduction, custom subtitles, faster opening of some MKV files and opening/ending detection. **Not** shipped: downloaded on demand the first time a feature needs it, and verified against the published SHA-256. | LGPL |
+| [librqbit](https://github.com/ikatson/rqbit) | Torrent engine and streaming | Apache-2.0 |
+| [discord-rich-presence](https://github.com/vionya/discord-rich-presence) | Discord Rich Presence | MIT |
 | [AniList](https://anilist.co/) · [AniSkip](https://aniskip.com/) · [Nyaa](https://nyaa.si/) | Anime data, skip times and episode search | — |
 
 ## ⚖️ Disclaimer
