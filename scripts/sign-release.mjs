@@ -55,11 +55,17 @@ const targets = {
 const platforms = {};
 for (const [platform, name] of Object.entries(targets)) {
   const file = join(dir, name);
-  execFileSync(
-    "npx",
-    ["tauri", "signer", "sign", "-f", keyPath, "-p", process.env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD ?? "", file],
-    { stdio: "inherit", shell },
-  );
+  // Chave e senha por variável de ambiente: no Windows (shell) um argumento
+  // vazio — senha em branco — some da linha de comando.
+  execFileSync("npx", ["tauri", "signer", "sign", file], {
+    stdio: "inherit",
+    shell,
+    env: {
+      ...process.env,
+      TAURI_SIGNING_PRIVATE_KEY_PATH: keyPath,
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: process.env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD ?? "",
+    },
+  });
   platforms[platform] = {
     signature: readFileSync(`${file}.sig`, "utf8").trim(),
     url: `https://github.com/${REPO}/releases/download/${tag}/${encodeURIComponent(name)}`,
