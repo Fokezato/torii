@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://github.com/Fokezato/torii/releases"><img src="https://img.shields.io/github/v/release/Fokezato/torii?include_prereleases&label=release&color=FF6A45" alt="Latest release"></a>
   <a href="https://github.com/Fokezato/torii/releases"><img src="https://img.shields.io/github/downloads/Fokezato/torii/total?color=FF6A45" alt="Downloads"></a>
-  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%26%20Android%20soon-0078D6" alt="Platform: Windows | Linux &amp; Android soon">
+  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Android%20soon-0078D6" alt="Platform: Windows | Linux | Android soon">
   <img src="https://img.shields.io/badge/built%20with-Tauri%202-24C8DB?logo=tauri&logoColor=white" alt="Built with Tauri 2">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-6C7180" alt="License: PolyForm Noncommercial"></a>
 </p>
@@ -27,7 +27,7 @@
 > [!NOTE]
 > Torii is in **beta** and may still have bugs or rough edges. If you run into a problem, please [open an issue](https://github.com/Fokezato/torii/issues).
 >
-> Available for Windows today; Linux and Android versions are planned.
+> Available for Windows and Linux; an Android version is planned.
 
 ## ✨ Features
 
@@ -46,16 +46,29 @@
 
 ## 💻 Requirements
 
+**Windows**
 - Windows 10 or 11 (64-bit)
 - [WebView2](https://developer.microsoft.com/microsoft-edge/webview2/) runtime (preinstalled on Windows 11; the installer downloads it if missing)
-- Internet connection for the catalog and downloads
+
+**Linux** (x86_64)
+- VLC (libVLC) from your distribution, with its subtitle and audio plugins. Fedora needs [RPM Fusion](https://rpmfusion.org/) for H.264/HEVC playback; Bazzite already includes what Torii needs.
+- FFmpeg (recommended, for opening/ending detection, custom subtitles and file size options)
+- An X11 or Wayland desktop (on Wayland, Torii runs through XWayland)
+
+An internet connection is needed for the catalog and downloads.
 
 ## 🚀 Installation
 
-1. Download **`Torii_x.y.z_x64-setup.exe`** from the [latest release](https://github.com/Fokezato/torii/releases).
-2. Run the installer.
+Download from the [latest release](https://github.com/Fokezato/torii/releases):
 
-From version 0.4.0 on, Torii updates itself: when a new version is released, a banner inside the app offers to install it.
+| System | File |
+| --- | --- |
+| Windows | **`Torii_x.y.z_x64-setup.exe`** — run the installer |
+| Linux (any distro) | **`Torii_x.y.z_amd64.AppImage`** — make it executable and run it |
+| Debian / Ubuntu | **`Torii_x.y.z_amd64.deb`** — `sudo apt install ./Torii_x.y.z_amd64.deb` |
+| Fedora / openSUSE | **`Torii-x.y.z-1.x86_64.rpm`** — `sudo dnf install ./Torii-x.y.z-1.x86_64.rpm` |
+
+Torii updates itself (Windows installer and Linux AppImage): when a new version is released, a banner inside the app offers to install it. The `.deb` and `.rpm` packages are updated by downloading the new version.
 
 > [!IMPORTANT]
 > The installer is not code-signed yet, so Windows shows a blue **"Windows protected your PC"** screen. Click **More info → Run anyway**.
@@ -72,14 +85,17 @@ npm run tauri dev     # run in development
 npm run tauri build   # build the installer (src-tauri/target/release/bundle)
 ```
 
+On Linux, install the WebKitGTK 4.1, libappindicator, librsvg and libX11 development packages first (see `.github/workflows/build.yml`).
+
 **Stack:** [Tauri 2](https://tauri.app/) (Rust) · React · TypeScript · Tailwind CSS
 
 ## 🧩 Third-party components
 
 | Component | Used for | License |
 | --- | --- | --- |
-| [libVLC](https://www.videolan.org/vlc/libvlc.html) (VideoLAN) | Video playback. Shipped in `src-tauri/vendor/vlc` with its original license, loaded dynamically and unmodified. | LGPL-2.1 |
-| [FFmpeg](https://github.com/BtbN/FFmpeg-Builds) (BtbN LGPL builds) | File size reduction, custom subtitles, faster opening of some MKV files and opening/ending detection. **Not** shipped: downloaded on demand the first time a feature needs it, and verified against the published SHA-256. | LGPL |
+| [libVLC](https://www.videolan.org/vlc/libvlc.html) (VideoLAN) | Video playback. On Windows, shipped in `src-tauri/vendor/vlc` with its original license, loaded dynamically and unmodified. On Linux, the system libVLC is used. | LGPL-2.1 |
+| [FFmpeg](https://github.com/BtbN/FFmpeg-Builds) (BtbN LGPL builds) | File size reduction, custom subtitles, faster opening of some MKV files and opening/ending detection. **Not** shipped: on Windows, downloaded on demand the first time a feature needs it and verified against the published SHA-256; on Linux, the system FFmpeg is used. | LGPL |
+| [souvlaki](https://github.com/Sinono3/souvlaki) | Media keys and desktop media controls on Linux (MPRIS) | MIT |
 | [librqbit](https://github.com/ikatson/rqbit) | Torrent engine and streaming | Apache-2.0 |
 | [discord-rich-presence](https://github.com/vionya/discord-rich-presence) | Discord Rich Presence | MIT |
 | [AniList](https://anilist.co/) · [AniSkip](https://aniskip.com/) · [Nyaa](https://nyaa.si/) | Anime data, skip times and episode search | — |
