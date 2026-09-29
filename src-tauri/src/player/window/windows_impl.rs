@@ -19,6 +19,22 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WNDCLASSEXW, WS_CHILD, WS_EX_NOACTIVATE,
 };
 
+/// HWND da janela.
+pub type Surface = HWND;
+
+pub fn to_raw(surface: Surface) -> isize {
+    surface.0 as isize
+}
+
+pub fn from_raw(raw: isize) -> Surface {
+    HWND(raw as *mut std::ffi::c_void)
+}
+
+/// HWND da janela principal do Tauri.
+pub fn main_surface(window: &tauri::WebviewWindow) -> Option<Surface> {
+    window.hwnd().ok()
+}
+
 const CLASS_NAME: windows::core::PCWSTR = w!("ToriiVideoSurface");
 static REGISTER_ONCE: Once = Once::new();
 
@@ -48,7 +64,7 @@ fn register_class() {
 /// Cria a HWND filha, invisível/0x0 até o primeiro `resize` real vindo do
 /// React (evita um quadrado preto de 1x1 piscando no canto antes do layout
 /// assentar).
-pub fn create_child(parent: HWND) -> windows::core::Result<HWND> {
+pub fn create_child(parent: HWND) -> Result<HWND, String> {
     register_class();
     unsafe {
         let hinstance = GetModuleHandleW(None).unwrap_or_default();
@@ -65,7 +81,8 @@ pub fn create_child(parent: HWND) -> windows::core::Result<HWND> {
             None,
             Some(hinstance.into()),
             None,
-        )?;
+        )
+        .map_err(|e| e.to_string())?;
         // O WebView2 é ele mesmo uma HWND filha da mesma janela principal —
         // sem forçar HWND_TOP aqui, a ordem de criação/repaint do WebView2
         // podia deixar nossa janela atrás dele (vídeo tocando com som mas

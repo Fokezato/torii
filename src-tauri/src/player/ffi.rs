@@ -28,7 +28,11 @@ type FnMediaRelease = unsafe extern "C" fn(*mut LibvlcMedia);
 type FnPlayerNew = unsafe extern "C" fn(*mut LibvlcInstance) -> *mut LibvlcMediaPlayer;
 type FnPlayerRelease = unsafe extern "C" fn(*mut LibvlcMediaPlayer);
 type FnPlayerSetMedia = unsafe extern "C" fn(*mut LibvlcMediaPlayer, *mut LibvlcMedia);
-type FnPlayerSetHwnd = unsafe extern "C" fn(*mut LibvlcMediaPlayer, *mut c_void);
+#[cfg(windows)]
+type FnPlayerSetWindow = unsafe extern "C" fn(*mut LibvlcMediaPlayer, *mut c_void);
+/// `libvlc_media_player_set_xwindow` (XID de 32 bits).
+#[cfg(not(windows))]
+type FnPlayerSetWindow = unsafe extern "C" fn(*mut LibvlcMediaPlayer, u32);
 type FnPlayerPlay = unsafe extern "C" fn(*mut LibvlcMediaPlayer) -> c_int;
 type FnPlayerSetPause = unsafe extern "C" fn(*mut LibvlcMediaPlayer, c_int);
 type FnPlayerStop = unsafe extern "C" fn(*mut LibvlcMediaPlayer);
@@ -116,7 +120,7 @@ pub struct VlcApi {
     pub player_new: FnPlayerNew,
     pub player_release: FnPlayerRelease,
     pub player_set_media: FnPlayerSetMedia,
-    pub player_set_hwnd: FnPlayerSetHwnd,
+    pub player_set_window: FnPlayerSetWindow,
     pub player_play: FnPlayerPlay,
     pub player_set_pause: FnPlayerSetPause,
     pub player_stop: FnPlayerStop,
@@ -165,7 +169,10 @@ pub unsafe fn load(lib: &Library) -> Result<VlcApi, String> {
         player_new: sym!(lib, b"libvlc_media_player_new\0"),
         player_release: sym!(lib, b"libvlc_media_player_release\0"),
         player_set_media: sym!(lib, b"libvlc_media_player_set_media\0"),
-        player_set_hwnd: sym!(lib, b"libvlc_media_player_set_hwnd\0"),
+        #[cfg(windows)]
+        player_set_window: sym!(lib, b"libvlc_media_player_set_hwnd\0"),
+        #[cfg(not(windows))]
+        player_set_window: sym!(lib, b"libvlc_media_player_set_xwindow\0"),
         player_play: sym!(lib, b"libvlc_media_player_play\0"),
         player_set_pause: sym!(lib, b"libvlc_media_player_set_pause\0"),
         player_stop: sym!(lib, b"libvlc_media_player_stop\0"),

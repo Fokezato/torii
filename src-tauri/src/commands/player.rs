@@ -74,7 +74,7 @@ pub fn player_open(
     engine.open(&source, start_ms).map_err(AppError::Fetch)?;
     engine.play();
     drop(guard);
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     state.with_media_session(|s| s.set_active(Some((&title, &episode_label))));
     spawn_stream_cleanup(&app, Some(source.clone()));
     spawn_discord_open(&app, title.clone(), episode_label.clone(), watch_id);
@@ -92,7 +92,7 @@ pub fn player_play(state: State<'_, PlayerState>) -> Result<(), AppError> {
 #[tauri::command]
 pub fn player_set_paused(state: State<'_, PlayerState>, paused: bool) -> Result<(), AppError> {
     with_engine(&state, |e| e.set_paused(paused))?;
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     state.with_media_session(|s| s.set_playing(!paused));
     Ok(())
 }
@@ -105,7 +105,7 @@ pub fn player_stop(app: AppHandle, state: State<'_, PlayerState>) -> Result<(), 
         presence.clear();
     }
     // Parou = teclas de mídia voltam pros outros apps.
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     state.with_media_session(|s| s.set_active(None));
     Ok(())
 }
@@ -203,13 +203,10 @@ pub async fn player_ambient_frame(app: AppHandle) -> tauri::ipc::Response {
         if vw == 0 || vh == 0 || raw_hwnd == 0 {
             return Vec::new();
         }
-        #[cfg(windows)]
         let capture = crate::player::window::capture_colors(
-            windows::Win32::Foundation::HWND(raw_hwnd as *mut std::ffi::c_void),
+            crate::player::window::from_raw(raw_hwnd),
             AMBIENT_FRAME_WIDTH,
         );
-        #[cfg(not(windows))]
-        let capture: Option<(u32, u32, Vec<u8>)> = None;
         let Some((w, h, pixels)) = capture else { return Vec::new() };
         let mut out = Vec::with_capacity(16 + pixels.len());
         for n in [w, h, vw, vh] {
@@ -369,7 +366,7 @@ async fn aniskip_segments(
 #[tauri::command]
 pub fn player_resize(state: State<'_, PlayerState>, x: i32, y: i32, width: i32, height: i32) -> Result<(), AppError> {
     with_engine(&state, |e| {
-        crate::player::window::resize(e.hwnd(), x, y, width, height);
+        crate::player::window::resize(e.surface(), x, y, width, height);
     })
 }
 
@@ -379,9 +376,10 @@ pub fn player_resize(state: State<'_, PlayerState>, x: i32, y: i32, width: i32, 
 /// o WebView2 pode reafirmar o PRÓPRIO z-order em momentos que um resize
 /// único não cobre (ex. overlay terminando de inicializar).
 #[tauri::command]
+#[cfg_attr(not(windows), allow(unused_variables))]
 pub fn player_bring_to_front(app: AppHandle, state: State<'_, PlayerState>) -> Result<(), AppError> {
     with_engine(&state, |e| {
-        crate::player::window::bring_to_front(e.hwnd());
+        crate::player::window::bring_to_front(e.surface());
     })?;
 
     // Overlay logo acima da principal (ver `window::ensure_above`) — mesmo
@@ -396,10 +394,21 @@ pub fn player_bring_to_front(app: AppHandle, state: State<'_, PlayerState>) -> R
     Ok(())
 }
 
+/// Tira a overlay dos controles da tela. Windows: manda pra fora da tela
+/// (esconder/mostrar a janela bagunçava a relação de owner). Linux: o
+/// gerenciador de janelas traz de volta janela fora da tela, então esconde
+/// de verdade.
+pub fn hide_overlay(overlay: &tauri::WebviewWindow) {
+    #[cfg(windows)]
+    let _ = overlay.set_position(PhysicalPosition::new(-32000, -32000));
+    #[cfg(not(windows))]
+    let _ = overlay.hide();
+}
+
 #[tauri::command]
 pub fn player_set_visible(state: State<'_, PlayerState>, visible: bool) -> Result<(), AppError> {
     with_engine(&state, |e| {
-        crate::player::window::set_visible(e.hwnd(), visible);
+        crate::player::window::set_visible(e.surface(), visible);
     })
 }
 
@@ -457,20 +466,26 @@ pub fn player_set_video_area(
     // Os controles (overlay) cobrem sempre a área toda.
     let [vx, vy, vw, vh] = video.unwrap_or([x, y, width, height]);
     with_engine(&state, |e| {
-        crate::player::window::resize(e.hwnd(), vx, vy, vw, vh);
-        crate::player::window::set_visible(e.hwnd(), on_screen);
+        crate::player::window::resize(e.surface(), vx, vy, vw, vh);
+        crate::player::window::set_visible(e.surface(), on_screen);
     })?;
 
     if let Some(overlay) = app.get_webview_window(OVERLAY_LABEL) {
-        #[cfg(windows)]
-        let (final_x, final_y) = match main.as_ref().and_then(|m| m.hwnd().ok()) {
-            Some(main_hwnd) => crate::player::window::client_to_screen(main_hwnd, x, y),
+        let (final_x, final_y) = match main.as_ref().and_then(crate::player::window::main_surface) {
+            Some(main_surface) => crate::player::window::client_to_screen(main_surface, x, y),
             None => (overlay_x, overlay_y),
         };
         #[cfg(not(windows))]
-        let (final_x, final_y) = (overlay_x, overlay_y);
+        if !on_screen {
+            hide_overlay(&overlay);
+            return Ok(());
+        }
         let _ = overlay.set_position(PhysicalPosition::new(final_x, final_y));
         let _ = overlay.set_size(PhysicalSize::new(width.max(1) as u32, height.max(1) as u32));
+        #[cfg(not(windows))]
+        if !overlay.is_visible().unwrap_or(true) {
+            let _ = overlay.show();
+        }
     }
     Ok(())
 }

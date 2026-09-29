@@ -1,0 +1,11 @@
+{
+  "bundle": {
+    "resources": {
+      "vendor/vlc/libvlc.dll": "libvlc.dll",
+      "vendor/vlc/libvlccore.dll": "libvlccore.dll",
+      "vendor/vlc/plugins/": "plugins/",
+      "vendor/vlc/COPYING.txt": "licenses/libvlc-COPYING.txt",
+      "vendor/vlc/AUTHORS.txt": "licenses/libvlc-AUTHORS.txt"
+    }
+  }
+}

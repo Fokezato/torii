@@ -1,13 +1,16 @@
 pub mod ffi;
 #[cfg(windows)]
 pub mod media_session;
+#[cfg(target_os = "linux")]
+#[path = "media_session_linux.rs"]
+pub mod media_session;
 pub mod media_tools;
 pub mod window;
 
 use ffi::{LibvlcInstance, LibvlcMedia, LibvlcMediaPlayer, LibvlcTrackDescription, VlcApi, VlcState};
 use libloading::Library;
 use std::ffi::{CStr, CString};
-use windows::Win32::Foundation::HWND;
+use window::Surface;
 
 /// Motor de playback: carrega libvlc.dll, mantém instância + media player
 /// vivos, embutidos na HWND filha criada por `window::create_child`. Fica
@@ -22,7 +25,7 @@ pub struct PlayerEngine {
     instance: *mut LibvlcInstance,
     player: *mut LibvlcMediaPlayer,
     media: Option<*mut LibvlcMedia>,
-    hwnd: HWND,
+    surface: Surface,
     /// Instância separada pra miniatura/leitura de arquivo (ver
     /// `media_tools`) — `None` se não conseguiu criar; o player segue igual.
     tools: Option<media_tools::MediaTools>,
@@ -74,33 +77,47 @@ unsafe fn collect_tracks(api: &VlcApi, head: *mut LibvlcTrackDescription, active
     out
 }
 
+/// Carrega o libvlc + argumentos da instância. Windows: o vendorizado do
+/// lado do .exe (ver src-tauri/vendor/vlc), com a pasta de plugins dele.
+/// Linux: o do sistema (pacote vlc), que acha os próprios plugins.
+#[cfg(windows)]
+fn load_libvlc() -> Result<(Library, Vec<CString>), String> {
+    let exe_dir = std::env::current_exe()
+        .map_err(|e| e.to_string())?
+        .parent()
+        .ok_or_else(|| "sem diretório pai do executável".to_string())?
+        .to_path_buf();
+    let dll_path = exe_dir.join("libvlc.dll");
+    // SAFETY: libvlc.dll é uma DLL confiável, vendorizada pelo próprio
+    // projeto — não é input de usuário.
+    let lib = unsafe { Library::new(&dll_path) }
+        .map_err(|e| format!("falha ao carregar libvlc.dll em {}: {e}", dll_path.display()))?;
+    // "--plugin-path=" explícito elimina qualquer ambiguidade de working
+    // directory (o libvlc também acharia "plugins" do lado do .dll).
+    let plugin_arg = CString::new(format!("--plugin-path={}", exe_dir.join("plugins").display()))
+        .map_err(|e| e.to_string())?;
+    Ok((lib, vec![plugin_arg, CString::new("--quiet").unwrap()]))
+}
+
+#[cfg(not(windows))]
+fn load_libvlc() -> Result<(Library, Vec<CString>), String> {
+    // SAFETY: libvlc do sistema, instalado pelo gerenciador de pacotes.
+    let lib = unsafe { Library::new("libvlc.so.5") }.map_err(|e| {
+        format!("libVLC não encontrado ({e}) — instale o VLC pelo gerenciador de pacotes")
+    })?;
+    // --no-xlib: o app não chama XInitThreads; o vídeo usa xcb de qualquer jeito.
+    Ok((lib, vec![CString::new("--quiet").unwrap(), CString::new("--no-xlib").unwrap()]))
+}
+
 impl PlayerEngine {
-    /// `hwnd`: a child window já criada (ver `window::create_child`) onde o
-    /// vídeo vai renderizar.
-    pub fn new(hwnd: HWND) -> Result<Self, String> {
-        let exe_dir = std::env::current_exe()
-            .map_err(|e| e.to_string())?
-            .parent()
-            .ok_or_else(|| "sem diretório pai do executável".to_string())?
-            .to_path_buf();
-        let dll_path = exe_dir.join("libvlc.dll");
-
-        // SAFETY: libvlc.dll é uma DLL confiável, vendorizada pelo próprio
-        // projeto (ver src-tauri/vendor/vlc) — não é input de usuário.
-        let lib = unsafe { Library::new(&dll_path) }
-            .map_err(|e| format!("falha ao carregar libvlc.dll em {}: {e}", dll_path.display()))?;
-        // SAFETY: acabou de carregar o libvlc.dll de verdade acima; os
-        // símbolos resolvidos batem com a ABI documentada do libvlc 3.x.
+    /// `surface`: a janela filha já criada (ver `window::create_child`) onde
+    /// o vídeo vai renderizar.
+    pub fn new(surface: Surface) -> Result<Self, String> {
+        let (lib, arg_strings) = load_libvlc()?;
+        // SAFETY: acabou de carregar o libvlc de verdade; os símbolos
+        // resolvidos batem com a ABI documentada do libvlc 3.x.
         let api = unsafe { ffi::load(&lib) }?;
-
-        let plugin_path = exe_dir.join("plugins");
-        // "--plugin-path=" também funcionaria sem isso (o libvlc acha a
-        // pasta "plugins" sozinho do lado do próprio .dll), mas explícito
-        // elimina qualquer ambiguidade de working directory.
-        let plugin_arg = CString::new(format!("--plugin-path={}", plugin_path.display()))
-            .map_err(|e| e.to_string())?;
-        let quiet_arg = CString::new("--quiet").map_err(|e| e.to_string())?;
-        let args = [plugin_arg.as_ptr(), quiet_arg.as_ptr()];
+        let args: Vec<*const std::os::raw::c_char> = arg_strings.iter().map(|a| a.as_ptr()).collect();
 
         // SAFETY: `api.new` veio do load acima, args são CStrings válidas
         // vivas até o fim desse escopo (a chamada é síncrona).
@@ -116,19 +133,26 @@ impl PlayerEngine {
             return Err("libvlc_media_player_new retornou nulo".to_string());
         }
 
-        // SAFETY: player não-nulo; hwnd.0 é o handle Win32 cru da child
-        // window já criada por quem chama.
-        unsafe { (api.player_set_hwnd)(player, hwnd.0) };
+        // SAFETY: player não-nulo; `surface` é a janela filha já criada por
+        // quem chama (HWND no Windows, XID no Linux).
+        #[cfg(windows)]
+        unsafe {
+            (api.player_set_window)(player, surface.0)
+        };
+        #[cfg(not(windows))]
+        unsafe {
+            (api.player_set_window)(player, surface as u32)
+        };
 
         // SAFETY: mesmos args válidos da instância principal.
         let tools_instance = unsafe { (api.new)(args.len() as i32, args.as_ptr()) };
         let tools = (!tools_instance.is_null()).then(|| media_tools::MediaTools::new(api, tools_instance));
 
-        Ok(Self { _lib: lib, api, instance, player, media: None, hwnd, tools })
+        Ok(Self { _lib: lib, api, instance, player, media: None, surface, tools })
     }
 
-    pub fn hwnd(&self) -> HWND {
-        self.hwnd
+    pub fn surface(&self) -> Surface {
+        self.surface
     }
 
     /// Tamanho real do vídeo tocando (sem as faixas pretas). `None` antes
@@ -291,7 +315,7 @@ pub struct PlayerState {
     pub now_playing: std::sync::Mutex<NowPlaying>,
     /// Teclas de mídia + painel de mídia do Windows (ver `media_session`).
     /// `None` se não deu pra registrar — o player funciona igual sem.
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     pub media_session: std::sync::Mutex<Option<media_session::MediaSession>>,
     /// Tamanho real do vídeo (largura << 32 | altura; 0 = sem vídeo) e HWND
     /// do vídeo, pra luz ambiente ler SEM tocar no libvlc nem no `engine`.
@@ -310,14 +334,14 @@ impl Default for PlayerState {
             now_playing: std::sync::Mutex::new(NowPlaying::default()),
             video_size: std::sync::atomic::AtomicU64::new(0),
             video_hwnd: std::sync::atomic::AtomicIsize::new(0),
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "linux"))]
             media_session: std::sync::Mutex::new(None),
         }
     }
 }
 
 impl PlayerState {
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     pub fn with_media_session(&self, f: impl FnOnce(&media_session::MediaSession)) {
         if let Some(session) = self.media_session.lock().unwrap().as_ref() {
             f(session);
