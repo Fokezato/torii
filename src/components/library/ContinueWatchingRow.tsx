@@ -44,7 +44,7 @@ function buildItems(groups: WatchGroup[], episodes: Episode[]): ContinueItem[] {
     );
     const ordered = seasons.flatMap((watch) =>
       (byWatch.get(watch.id) ?? [])
-        .filter((ep) => episodeNumberOf(ep) != null && (ep.item_path ?? ep.save_path))
+        .filter((ep) => episodeNumberOf(ep) != null && ep.item_path)
         .sort((a, b) => (episodeNumberOf(a) ?? 0) - (episodeNumberOf(b) ?? 0))
         .map((episode) => ({ watch, episode })),
     );
@@ -75,7 +75,7 @@ function ContinueCard({ item }: { item: ContinueItem }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { watch, episode, upNext } = item;
-  const path = (episode.item_path ?? episode.save_path)!;
+  const path = episode.item_path!;
   const position = upNext ? 0 : (episode.watch_position_ms ?? 0);
 
   const { data: probe } = useQuery({

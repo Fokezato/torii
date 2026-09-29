@@ -11,10 +11,11 @@ interface ContentRowProps {
   items?: AnimeSummary[];
   isLoading?: boolean;
   onSelect?: (anime: AnimeSummary) => void;
+  onAdd?: (anime: AnimeSummary) => void;
   extra?: ReactNode;
 }
 
-export function ContentRow({ title, subtitle, items, isLoading, onSelect, extra }: ContentRowProps) {
+export function ContentRow({ title, subtitle, items, isLoading, onSelect, onAdd, extra }: ContentRowProps) {
   const { t } = useTranslation();
   return (
     <section className="space-y-4">
@@ -31,7 +32,12 @@ export function ContentRow({ title, subtitle, items, isLoading, onSelect, extra 
             ))}
           {!isLoading &&
             items?.map((anime) => (
-              <AnimeCard key={anime.anilist_id} anime={anime} onClick={() => onSelect?.(anime)} />
+              <AnimeCard
+                key={anime.anilist_id}
+                anime={anime}
+                onAdd={() => onAdd?.(anime)}
+                onDetails={() => onSelect?.(anime)}
+              />
             ))}
           {!isLoading && items?.length === 0 && (
             <p className="py-8 text-sm text-muted-foreground">{t("common.nothingFound")}</p>

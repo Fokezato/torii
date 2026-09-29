@@ -69,9 +69,68 @@ pub async fn create_watch(
     Ok(created)
 }
 
+/// O que o "Remover" da página do anime faz.
+#[derive(Debug, Clone, Copy, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoveMode {
+    /// Tira da Biblioteca e apaga os arquivos baixados (e os parciais).
+    Everything,
+    /// Tira da Biblioteca, arquivos continuam na pasta.
+    KeepFiles,
+    /// Continua na Biblioteca; apaga os arquivos e marca os episódios como
+    /// removidos (não baixa de novo sozinho, dá pra "Baixar de novo").
+    FilesOnly,
+}
+
+/// Remove um anime (temporada). Sempre para os torrents dele — antes o
+/// registro sumia e o download seguia rodando. Devolve quantos arquivos não
+/// deu pra apagar (ex. aberto em outro programa).
 #[tauri::command]
-pub async fn delete_watch(state: State<'_, AppState>, id: i64) -> Result<(), AppError> {
-    Ok(db::watches::delete(&state.db, id).await?)
+pub async fn remove_watch(state: State<'_, AppState>, id: i64, mode: RemoveMode) -> Result<u32, AppError> {
+    let watch = db::watches::get(&state.db, id).await?;
+    let episodes = db::episodes::list_for_watch(&state.db, id).await?;
+    let delete_files = mode != RemoveMode::KeepFiles;
+
+    let mut failed = 0u32;
+    for ep in &episodes {
+        // Torrent rastreado: para (e apaga o arquivo/parcial junto, se for o caso).
+        let _ = state.torrent.remove(ep.id, delete_files).await;
+        if delete_files && ep.status == "available" {
+            if let Some(path) = ep.item_path.as_deref() {
+                match std::fs::remove_file(path) {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(_) => failed += 1,
+                }
+            }
+        }
+    }
+    // Pasta só sai se ficou vazia — temporadas do mesmo anime podem dividir a pasta.
+    if delete_files {
+        let _ = std::fs::remove_dir(&watch.folder);
+    }
+
+    if mode == RemoveMode::FilesOnly {
+        for ep in episodes
+            .iter()
+            .filter(|e| matches!(e.status.as_str(), "available" | "downloading" | "found" | "ready" | "error"))
+        {
+            db::episodes::mark_deleted(&state.db, ep.id).await?;
+        }
+        state.activity.info(tr!(
+            "Arquivos apagados: {}",
+            "Files deleted: {}",
+            watch.title
+        ));
+    } else {
+        db::watches::delete(&state.db, id).await?;
+        state.activity.info(tr!(
+            "Removido da biblioteca: {}",
+            "Removed from library: {}",
+            watch.title
+        ));
+    }
+    Ok(failed)
 }
 
 #[tauri::command]

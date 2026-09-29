@@ -27,9 +27,13 @@ const DEFAULTS: &[(&str, &str)] = &[
     ("player_mark_intro", "1"),
     ("player_mark_ending", "1"),
     ("player_mark_recap", "1"),
+    // Luz ambiente (brilho com as cores do vídeo em volta dele).
+    ("player_ambient_light", "1"),
     // Detecta abertura/encerramento comparando o áudio dos episódios quando
     // o AniSkip não tem os tempos (ver src/intro_detect.rs). Usa o ffmpeg.
     ("detect_segments", "1"),
+    // Confere o latest.json da última release no GitHub ao abrir o app.
+    ("auto_update_check", "1"),
     // Apagar episódio depois de assistido (player nativo marca "assistido"
     // ao chegar no encerramento/90%) — desligado por padrão; espera N horas
     // antes de apagar, pra dar tempo de rever.

@@ -24,11 +24,15 @@ export function WeeklySchedule() {
   const { t } = useTranslation();
   const { data: watches } = useQuery({ queryKey: ["watches"], queryFn: listWatches });
 
+  // Todo anime da Biblioteca que ainda está no ar — independe de "checar
+  // novos episódios" (desligado ao limitar os episódios, por exemplo), já
+  // que o calendário só informa quando sai o próximo.
   const ids = useMemo(
-    () =>
-      (watches ?? [])
-        .filter((w) => w.active && w.anilist_id != null)
-        .map((w) => w.anilist_id as number),
+    () => [
+      ...new Set(
+        (watches ?? []).filter((w) => w.anilist_id != null).map((w) => w.anilist_id as number),
+      ),
+    ],
     [watches],
   );
 

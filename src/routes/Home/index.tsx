@@ -54,6 +54,7 @@ export default function Home() {
           items={search.data}
           isLoading={search.isLoading}
           onSelect={setDetailTarget}
+          onAdd={setAddTarget}
         />
       ) : (
         <>
@@ -63,6 +64,7 @@ export default function Home() {
             items={filteredSeason}
             isLoading={season.isLoading}
             onSelect={setDetailTarget}
+            onAdd={setAddTarget}
             extra={
               seasonGenres.length > 0 && (
                 <GenreFilterBar genres={seasonGenres} value={genre} onChange={setGenre} />
@@ -74,6 +76,7 @@ export default function Home() {
             items={trending.data}
             isLoading={trending.isLoading}
             onSelect={setDetailTarget}
+            onAdd={setAddTarget}
           />
           <MyListRow />
           <WeeklySchedule />
