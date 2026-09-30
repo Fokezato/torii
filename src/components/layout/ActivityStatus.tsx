@@ -20,6 +20,7 @@ export function ActivityStatus() {
       <PopoverTrigger asChild>
         <button
           type="button"
+          data-tour="activity"
           className="flex max-w-[280px] items-center gap-2 rounded-full border border-border bg-muted px-3.5 py-2 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
         >
           <Activity className="size-[15px] shrink-0 text-accent2" strokeWidth={2} />

@@ -107,3 +107,49 @@
     background: transparent;
     }
 }
+
+.driver-popover.torii-tour {
+  background: #15171d;
+  color: #eef0f4;
+  border: 1px solid #262a35;
+  border-radius: 14px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+  padding: 18px 18px 14px;
+  max-width: 320px;
+}
+.driver-popover.torii-tour .driver-popover-title {
+  font-family: var(--font-heading);
+  font-size: 16px;
+  font-weight: 700;
+}
+.driver-popover.torii-tour .driver-popover-description {
+  color: #b5b9c4;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.driver-popover.torii-tour .driver-popover-progress-text {
+  color: #6c7180;
+  font-size: 11.5px;
+}
+.driver-popover.torii-tour .driver-popover-navigation-btns button {
+  background: transparent;
+  color: #b5b9c4;
+  border: 1px solid #33374a;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  text-shadow: none;
+}
+.driver-popover.torii-tour .driver-popover-navigation-btns button.driver-popover-next-btn {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+}
+.driver-popover.torii-tour .driver-popover-close-btn {
+  color: #6c7180;
+}
+.driver-popover.torii-tour .driver-popover-arrow-side-right.driver-popover-arrow { border-right-color: #15171d; }
+.driver-popover.torii-tour .driver-popover-arrow-side-left.driver-popover-arrow { border-left-color: #15171d; }
+.driver-popover.torii-tour .driver-popover-arrow-side-top.driver-popover-arrow { border-top-color: #15171d; }
+.driver-popover.torii-tour .driver-popover-arrow-side-bottom.driver-popover-arrow { border-bottom-color: #15171d; }

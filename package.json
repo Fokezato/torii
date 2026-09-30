@@ -26,6 +26,7 @@
     "@tauri-apps/plugin-updater": "^2.13.0",
     "class-variance-authority": "^0.7.1",
     "cn": "^0.3.2",
+    "driver.js": "^1.8.0",
     "embla-carousel-react": "^8.6.0",
     "framer-motion": "^13.4.0",
     "i18next": "^26.4.2",

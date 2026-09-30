@@ -32,7 +32,7 @@ export function HeroCarousel({ items, onAdd }: HeroCarouselProps) {
   if (items.length === 0) return null;
 
   return (
-    <Carousel setApi={setApi} opts={{ loop: true }} className="w-full">
+    <Carousel setApi={setApi} opts={{ loop: true }} className="w-full" data-tour="hero">
       <CarouselContent className="ml-0">
         {items.map((anime) => (
           <CarouselItem key={anime.anilist_id} className="pl-0">
