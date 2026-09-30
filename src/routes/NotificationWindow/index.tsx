@@ -37,11 +37,6 @@ export default function NotificationWindow() {
   }
 
   useEffect(() => {
-    // Documento próprio dessa janela (webview separada) — o CSS global do
-    // app principal deixa o <body> opaco, o que quebraria a transparência
-    // da janela flutuante. Só afeta essa janela, não a principal. Margin
-    // default do body (8px) + nosso padding somados passavam do tamanho da
-    // janela e o webview mostrava scrollbar — zera os dois e trava overflow.
     for (const el of [document.documentElement, document.body]) {
       el.style.background = "transparent";
       el.style.margin = "0";

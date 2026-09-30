@@ -63,7 +63,6 @@ export function WatchFormModal({ anime, onOpenChange }: WatchFormModalProps) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [stripAudio, setStripAudio] = useState(false);
   const [downscale, setDownscale] = useState(false);
-  // Ligado na Config = vale pra todos; aqui só aparece travado.
   const { data: settings } = useQuery({ queryKey: ["settings"], queryFn: getSettings, enabled: anime != null });
   const globalStrip = settings?.strip_unused_audio === "1";
   const globalDownscale = settings?.downscale_resolution === "720p";
@@ -105,7 +104,6 @@ export function WatchFormModal({ anime, onOpenChange }: WatchFormModalProps) {
         cover_url: anime!.cover_url,
         status: anime!.status,
         episodes: anime!.episodes,
-        // Streaming: o poller segue achando as fontes (sem baixar).
         active: tab === "streaming" ? true : autoDownload,
         streaming: tab === "streaming",
         notify_on_available: notify,
@@ -116,7 +114,6 @@ export function WatchFormModal({ anime, onOpenChange }: WatchFormModalProps) {
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["watches"] });
-      // Já deixa o ffmpeg baixando, pra estar pronto quando o 1º episódio terminar.
       if (tab === "local" && (stripAudio || downscale)) ffmpegInstall().catch(() => {});
       onOpenChange(false);
     },

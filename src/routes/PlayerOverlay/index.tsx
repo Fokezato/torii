@@ -67,10 +67,6 @@ import {
 
 const IDLE_HIDE_MS = 3000;
 const SKIP_MS = 10_000;
-// Depois de um seek, ignora a posição que vem do poll até ela convergir
-// pro alvo (ou esse tanto de tempo passar) — sem isso a agulha "voltava"
-// pro valor antigo por até 1 tick de poll antes de avançar de novo (bug
-// real reportado: pisca pra frente, volta, avança nde novo).
 const SEEK_SETTLE_MS = 1500;
 
 function formatTime(ms: number): string {
@@ -98,12 +94,9 @@ const DEFAULT_SKIP_SETTINGS: SkipSettings = {
   nextAfterEnding: false,
 };
 
-// Sobra depois do encerramento até isso = prévia/créditos, pula pro próximo
-// episódio. Mais que isso costuma ser cena de história depois do ED.
 const NEXT_AFTER_ENDING_MAX_TAIL_MS = 150_000;
 const PROGRESS_SAVE_MS = 10_000;
 
-/// Trecho "misto" (créditos por cima de cenas): nunca pula sozinho.
 function isMixed(s: SkipSegments, kind: SegmentKind): boolean {
   return (kind === "intro" && s.intro_mixed) || (kind === "ending" && s.ending_mixed);
 }
@@ -114,8 +107,6 @@ function segmentRange(s: SkipSegments, kind: SegmentKind): [number, number] | nu
   return start != null && end != null && end > start ? [start, end] : null;
 }
 
-/// Fonte servida pelo stream local (episódio ainda baixando, ver
-/// src-tauri/src/stream_server.rs).
 function isStreamSource(source: string | null | undefined): boolean {
   return !!source && source.startsWith("http://127.0.0.1:");
 }
@@ -124,8 +115,6 @@ function episodeSource(ep: Episode): string | null {
   return ep.status === "available" ? (ep.item_path ?? null) : null;
 }
 
-/// Dá pra abrir no player: baixado, ainda baixando (stream local) ou anime
-/// em modo Streaming (baixa e toca na hora).
 function canPlay(ep: Episode, watch: Watch | null): boolean {
   return episodeSource(ep) != null || ep.status === "downloading" || isStreamStartable(watch, ep);
 }
@@ -134,8 +123,6 @@ function episodeNumberOf(ep: Episode): number | null {
   return ep.episode_number ?? parseEpisodeNumber(ep.name);
 }
 
-/// Troca a mídia tocando pra esse episódio. `watch` dá o título CRU da
-/// temporada e o nome do anime — `formatPlayerTitle` monta H1/H2.
 async function openEpisode(ep: Episode, watchId: number, watch: Watch | null): Promise<void> {
   const source =
     episodeSource(ep) ??
@@ -148,13 +135,8 @@ async function openEpisode(ep: Episode, watchId: number, watch: Watch | null): P
   return playerOpen(source, title, episodeLabel, watchId, episodeNumberOf(ep));
 }
 
-// Trecho que termina a menos disso do fim do arquivo = "até o fim": pular
-// pro fim não funciona (o libvlc não consegue ir exatamente pro último
-// quadro, volta pra dentro do trecho e o botão reaparece em loop).
 const END_OF_FILE_SLACK_MS = 2_000;
 
-/// Pula o trecho: seek pro fim dele, ou — se ele vai até o fim do arquivo —
-/// abre o próximo episódio baixado (sem próximo, sai do player).
 function skipSegment(snap: PlayerSnapshot, endMs: number, seek: (ms: number) => void) {
   if (snap.duration_ms > 0 && endMs >= snap.duration_ms - END_OF_FILE_SLACK_MS) {
     openNextEpisode(snap)
@@ -167,7 +149,6 @@ function skipSegment(snap: PlayerSnapshot, endMs: number, seek: (ms: number) => 
   seek(endMs);
 }
 
-/// Próximo episódio JÁ BAIXADO do mesmo anime. `false` se não tiver.
 async function openNextEpisode(snap: PlayerSnapshot): Promise<boolean> {
   if (snap.watch_id == null || snap.episode_number == null) return false;
   const [episodes, watches] = await Promise.all([listWatchEpisodes(snap.watch_id), listWatches()]);
@@ -178,47 +159,31 @@ async function openNextEpisode(snap: PlayerSnapshot): Promise<boolean> {
   return true;
 }
 
-/// Janela transparente por cima do vídeo (ver `spawn_player_overlay_window`
-/// no lib.rs — `.owner()` mantém ela sempre acima da janela principal,
-/// criada 1x no boot). Some sozinha com o mouse parado, igual Netflix/
-/// YouTube; clicar em qualquer lugar (fora dos controles) alterna
-/// play/pause. "Voltar" e "próximo episódio" só emitem evento — quem tem
-/// o contexto de navegação (a página que abriu o player) escuta.
 export default function PlayerOverlay() {
   const { t } = useTranslation();
   const [snapshot, setSnapshot] = useState<PlayerSnapshot | null>(null);
-  // Vídeo parado esperando dado (abrindo, ou stream esperando o torrent
-  // baixar o trecho): a posição não anda mesmo sem estar pausado.
   const [stalled, setStalled] = useState(false);
   const lastMoveRef = useRef<{ pos: number; at: number }>({ pos: -1, at: 0 });
-  // Próximo episódio já pedido pra baixar nesta sessão (modo Streaming).
   const prefetchDoneRef = useRef(false);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [scrubbingPct, setScrubbingPct] = useState<number | null>(null);
   const [pendingSeek, setPendingSeek] = useState<{ ms: number; at: number } | null>(null);
   const [volumeHover, setVolumeHover] = useState(false);
-  // Valor local do slider enquanto arrasta — sem isso ele seguia o volume
-  // do poll (400ms) e dava "snap" pro valor antigo no meio do arraste.
   const [volumeDraft, setVolumeDraft] = useState<number | null>(null);
   const volumeReleaseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Atalhos de teclado: o listener é registrado 1x, mas chama sempre a
-  // versão mais nova do tratador (que lê o estado atual).
   const shortcutRef = useRef<(key: string, shift: boolean) => boolean>(() => false);
   const showControlsRef = useRef<() => void>(() => {});
   const mutedVolumeRef = useRef(80);
 
   useEffect(() => {
-    // Foco nos controles (essa janela): tecla chega aqui direto.
     function onKey(e: KeyboardEvent) {
       if (e.ctrlKey || e.altKey || e.metaKey) return;
       if (shortcutRef.current(e.key, e.shiftKey)) e.preventDefault();
     }
     window.addEventListener("keydown", onKey);
-    // Foco na janela principal (página do player): ela repassa por evento.
     const unlistenKey = listen<{ key: string; shift: boolean }>("player:shortcut", (event) =>
       shortcutRef.current(event.payload.key, event.payload.shift),
     );
-    // Tecla "próxima" do teclado de mídia (controle de mídia do Windows).
     const unlistenNext = listen("player:next-episode-requested", () => shortcutRef.current("n", true));
     return () => {
       window.removeEventListener("keydown", onKey);
@@ -226,8 +191,6 @@ export default function PlayerOverlay() {
       unlistenNext.then((fn) => fn());
     };
   }, []);
-  // Menu de áudio/legenda e painel de episódios são exclusivos — abrir um
-  // fecha o outro (antes ficavam os 2 abertos um em cima do outro).
   const [openMenu, setOpenMenu] = useState<"tracks" | "episodes" | "settings" | null>(null);
   const episodesOpen = openMenu === "episodes";
   const closingPanelAtRef = useRef(0);
@@ -238,29 +201,18 @@ export default function PlayerOverlay() {
   const [skipSettings, setSkipSettings] = useState<SkipSettings>(DEFAULT_SKIP_SETTINGS);
   const [skipSegments, setSkipSegments] = useState<SkipSegments | null>(null);
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Chave da sessão de mídia atual (título+episódio) — quando muda, é
-  // episódio novo, autoseleciona idioma preferido de novo; enquanto igual,
-  // não mexe mais (respeita troca manual do usuário via o seletor).
   const sessionKeyRef = useRef<string | null>(null);
   const autoSelectDoneRef = useRef(false);
-  // Evita chamar playerGetSkipSegments de novo a cada tick de poll (só 1x
-  // por sessão) e evita o autoskip re-disparar seek em loop enquanto o
-  // usuário ainda está dentro do MESMO trecho já pulado.
   const skipFetchDoneRef = useRef(false);
   const autoSkippedRef = useRef<Record<SegmentKind, boolean>>({ intro: false, ending: false, recap: false });
-  // "Próximo episódio depois do encerramento" dispara 1x por episódio.
   const nextTriggeredRef = useRef(false);
-  // Progresso salvo a cada PROGRESS_SAVE_MS; "assistido" marcado 1x por episódio.
   const lastProgressSaveRef = useRef(0);
   const watchedMarkedRef = useRef(false);
-  // Legenda personalizada (desenhada aqui, ver SubtitleLayer): estilo, faixa
-  // escolhida (posição entre as faixas de legenda do arquivo) e falas.
   const [subStyle, setSubStyle] = useState<SubtitleStyle>(DEFAULT_SUBTITLE_STYLE);
   const [customOrdinal, setCustomOrdinal] = useState<number | null>(null);
   const customOrdinalRef = useRef<number | null>(null);
   customOrdinalRef.current = customOrdinal;
   const [cues, setCues] = useState<SubtitleCue[] | null>(null);
-  // Faixa inicial já resolvida nessa sessão / extração falhou (volta pro VLC).
   const subResolvedRef = useRef(false);
   const customFailedRef = useRef(false);
   const autoSelectAtRef = useRef(0);
@@ -284,9 +236,6 @@ export default function PlayerOverlay() {
             return settled || timedOut ? null : pending;
           });
 
-          // Por número de abertura, não pelo título: sair e voltar pro mesmo
-          // episódio reabre o arquivo na faixa padrão, e precisa reaplicar
-          // idioma/skip/etc. mesmo com título igual.
           const sessionKey = String(snap.session);
           if (sessionKeyRef.current !== sessionKey) {
             sessionKeyRef.current = sessionKey;
@@ -302,15 +251,8 @@ export default function PlayerOverlay() {
             setCues(null);
             subResolvedRef.current = false;
             customFailedRef.current = false;
-            // Episódio novo: agulha volta a seguir o player do zero, sem
-            // herdar arraste/seek pendente do episódio anterior.
             setScrubbingPct(null);
             setPendingSeek(null);
-            // Relê a config a cada episódio novo, não só 1x no boot — essa
-            // janela é permanente (criada 1x, nunca remonta, ver
-            // spawn_player_overlay_window), então um fetch só no mount
-            // nunca via mudança feita depois em Config > Reprodução (bug
-            // real reportado: filtro de legenda simplesmente não aplicava).
             getSettings()
               .then((s) => {
                 setPreferredLangs({
@@ -334,19 +276,12 @@ export default function PlayerOverlay() {
               })
               .catch(() => {});
           }
-          // Busca 1x por sessão (watch_id/episode_number só ficam disponíveis
-          // depois que `player_open` termina — podem não vir ainda no 1º
-          // tick logo após trocar de episódio, por isso checa a cada tick até
-          // conseguir em vez de só na troca de sessão acima).
           if (!skipFetchDoneRef.current && snap.watch_id != null && snap.episode_number != null) {
             skipFetchDoneRef.current = true;
             playerGetSkipSegments(snap.watch_id, snap.episode_number)
               .then(setSkipSegments)
               .catch(() => {});
           }
-          // Progresso + "assistido" (chegou no encerramento; sem dado de
-          // encerramento, 90% do episódio). Base do "apagar depois de
-          // assistir" — ver engine::cleanup_once no Rust.
           if (
             !prefetchDoneRef.current &&
             snap.watch_id != null &&
@@ -387,9 +322,6 @@ export default function PlayerOverlay() {
               }
             }
 
-            // Depois do encerramento, se sobra só um trecho curto (prévia do
-            // próximo / créditos), vai direto pro próximo episódio. Trecho
-            // longo depois do ED costuma ser história — aí não pula.
             const ending = segmentRange(skipSegments, "ending");
             if (
               skipSettings.nextAfterEnding &&
@@ -408,8 +340,6 @@ export default function PlayerOverlay() {
           if (!autoSelectDoneRef.current && (preferredLangs.audio.length > 0 || preferredLangs.subtitle.length > 0)) {
             Promise.all([playerListAudioTracks(), playerListSubtitleTracks()])
               .then(([audioTracks, subtitleTracks]) => {
-                // Lista vazia = mídia ainda não terminou de "abrir" no
-                // libvlc, tenta de novo no próximo tick em vez de desistir.
                 if (audioTracks.length === 0 && subtitleTracks.length === 0) return;
                 autoSelectDoneRef.current = true;
                 autoSelectAtRef.current = Date.now();
@@ -424,9 +354,6 @@ export default function PlayerOverlay() {
               })
               .catch(() => {});
           }
-          // Legenda personalizada: depois da preferência de idioma aplicada,
-          // pega a faixa que o VLC escolheu, desliga a legenda dele e passa a
-          // desenhar aqui.
           const noPrefs = preferredLangs.audio.length === 0 && preferredLangs.subtitle.length === 0;
           const prefsApplied = noPrefs || (autoSelectDoneRef.current && Date.now() - autoSelectAtRef.current > 600);
           if (
@@ -450,16 +377,11 @@ export default function PlayerOverlay() {
           }
         })
         .catch(() => {});
-      // Piggyback nesse mesmo intervalo pra reafirmar o z-order do vídeo —
-      // o WebView2 pode empurrar ele pra trás sozinho, ver
-      // `player::window::bring_to_front` no lado Rust.
       playerBringToFront().catch(() => {});
     }, 400);
     return () => clearInterval(id);
   }, [preferredLangs, skipSettings, skipSegments, subStyle.mode]);
 
-  // Falas da faixa escolhida. Sem texto (legenda de imagem) ou erro: volta
-  // pra legenda do VLC nessa sessão.
   const currentSource = snapshot?.source ?? null;
   useEffect(() => {
     if (subStyle.mode !== "custom" || customOrdinal == null || !currentSource || isStreamSource(currentSource)) {
@@ -482,7 +404,6 @@ export default function PlayerOverlay() {
     };
   }, [currentSource, customOrdinal, subStyle.mode]);
 
-  /// Religa no VLC a faixa `ordinal` (sai do modo personalizado).
   function restoreVlcSubtitle(ordinal: number) {
     playerListSubtitleTracks()
       .then((tracks) => {
@@ -506,8 +427,6 @@ export default function PlayerOverlay() {
     setSubStyle(next);
   }
 
-  /// Menu de legendas no modo personalizado: troca a faixa desenhada aqui
-  /// (o VLC fica sem legenda).
   function selectCustomSubtitle(ordinal: number | null) {
     subResolvedRef.current = true;
     customFailedRef.current = false;
@@ -564,15 +483,12 @@ export default function PlayerOverlay() {
     playerSetVolume(v).catch(() => {});
   }
 
-  // Solta o valor local só depois do poll já refletir o volume novo.
   function releaseVolume() {
     if (volumeReleaseTimer.current) clearTimeout(volumeReleaseTimer.current);
     volumeReleaseTimer.current = setTimeout(() => setVolumeDraft(null), 1000);
   }
 
   const segmentMarks: SeekSegment[] = [];
-  // Trecho em que a reprodução está agora e que ainda não é pulado sozinho
-  // (com pulo automático ligado ele some sozinho — botão seria redundante).
   let activeSkip: { label: string; endMs: number } | null = null;
   if (skipSegments && durationMs > 0) {
     const toPct = (ms: number) => Math.min(100, Math.max(0, (ms / durationMs) * 100));
@@ -599,8 +515,6 @@ export default function PlayerOverlay() {
     setPendingSeek({ ms: clamped, at: Date.now() });
   }
 
-  /// Atalhos estilo YouTube. `true` = tecla tratada (quem chamou evita o
-  /// comportamento padrão, ex. espaço rolar a página).
   function handleShortcut(key: string, shift: boolean): boolean {
     if (!snapshot) return false;
     const k = key.length === 1 ? key.toLowerCase() : key;
@@ -632,8 +546,6 @@ export default function PlayerOverlay() {
     <div
       className="relative h-screen w-screen overflow-hidden"
       onPointerDownCapture={(e) => {
-        // Clique fora do painel de episódios fecha ele — e esse mesmo
-        // clique não conta como play/pause no vídeo.
         const target = e.target as HTMLElement;
         if (openMenu === "episodes" && !target.closest("[data-episodes-panel], [data-episodes-toggle]")) {
           closingPanelAtRef.current = Date.now();
@@ -641,9 +553,6 @@ export default function PlayerOverlay() {
         }
       }}
       onClick={() => {
-        // Horário em vez de flag: se o clique cair num controle que não
-        // propaga (barra de baixo), uma flag ficaria presa e engoliria o
-        // próximo clique no vídeo.
         if (Date.now() - closingPanelAtRef.current < 600) return;
         togglePause();
       }}
@@ -671,7 +580,6 @@ export default function PlayerOverlay() {
         </div>
       )}
 
-      {/* TOPO: voltar + título/episódio, os 2 do lado esquerdo */}
       <div
         className="absolute inset-x-0 top-0 flex items-center gap-4 px-6 pt-5 pb-16 transition-opacity duration-300"
         style={{
@@ -694,15 +602,7 @@ export default function PlayerOverlay() {
         </div>
       </div>
 
-      {/* CENTRO: -10s / play-pause grande / +10s — pointer-events só na
-          linha dos botões, não na tela inteira (senão o "toque em qualquer
-          lugar pausa" comia clique de tudo que tá embaixo/em cima dele). */}
       <div
-        // pointer-events-none: essa camada cobre a tela inteira (só pra
-        // centralizar os botões) e ficava por cima da barra do topo —
-        // engolia o clique no "voltar" (visto no log: clique caía numa DIV).
-        // Só a linha de botões recebe clique; o resto passa pro fundo
-        // (clique no vídeo = play/pause).
         className="pointer-events-none absolute inset-0 flex items-center justify-center transition-opacity duration-300"
         style={{ opacity: controlsVisible ? 1 : 0 }}
       >
@@ -746,8 +646,6 @@ export default function PlayerOverlay() {
         </div>
       </div>
 
-      {/* Botão de pular resumo/abertura/encerramento — estilo Netflix:
-          aparece sozinho durante o trecho, independente do mouse. */}
       {activeSkip && (
         <button
           type="button"
@@ -761,7 +659,6 @@ export default function PlayerOverlay() {
         </button>
       )}
 
-      {/* BASE: barra de progresso sólida + tempo + faixas + episódios + próximo ep + volume */}
       <div
         className="absolute inset-x-0 bottom-0 flex flex-col gap-2 px-6 pt-16 pb-5 transition-opacity duration-300"
         style={{
@@ -876,12 +773,7 @@ export default function PlayerOverlay() {
   );
 }
 
-/// "Temporada 3 - Episódio 1 - Título" (ver `formatPlayerTitle`) → tag
-/// "Temporada 3" + resto do texto.
 function EpisodeHeading({ label }: { label: string }) {
-  // Tudo antes de " - Episódio/Episode" é o nome da temporada ("Temporada 3",
-  // "Entertainment District Arc"...) — vira a tag. Os 2 idiomas: o rótulo é
-  // montado no idioma de quando o episódio foi aberto.
   const match = label.match(/^(.+?)\s+-\s+(?=Episódio|Episode)/);
   return (
     <h2 className="flex min-w-0 items-center gap-2 text-sm text-white/75">
@@ -897,12 +789,6 @@ function EpisodeHeading({ label }: { label: string }) {
 
 type SeekSegment ={ startPct: number; endPct: number; label: string };
 
-/// Barra de progresso própria (não `<input type=range>`): o range nativo só
-/// limpava o "arrastando" no mouseup em cima dele — soltando fora, a agulha
-/// ficava presa no último valor, até em episódio novo (bug real reportado).
-/// Aqui usa pointer capture, então o soltar sempre chega. Abertura/
-/// encerramento viram pedaços da própria barra (vão entre eles, estilo
-/// capítulos do YouTube) com tooltip no hover.
 const PREVIEW_STEP_MS = 5000;
 const previewCache = new Map<string, string>();
 
@@ -917,7 +803,6 @@ function SeekBar({
   durationMs: number;
   positionMs: number;
   segments: SeekSegment[];
-  /** Arquivo local tocando — sem ele (ou stream http) não tem miniatura. */
   source: string | null;
   onScrub: (pct: number | null) => void;
   onSeek: (ms: number) => void;
@@ -927,10 +812,6 @@ function SeekBar({
   const [hoverPct, setHoverPct] = useState<number | null>(null);
   const pct = durationMs > 0 ? Math.min(100, Math.max(0, (positionMs / durationMs) * 100)) : 0;
 
-  // Miniatura do hover: quadros a cada PREVIEW_STEP_MS, gerados sob demanda
-  // no Rust (~0,3–0,5s na 1ª vez) e cacheados. Só 1 pedido por vez — o
-  // hover andando rápido não enfileira dezenas de decodificações, só busca
-  // o ÚLTIMO ponto pedido quando o anterior termina.
   const previewSource = source && !/^https?:\/\//.test(source) ? source : null;
   const [preview, setPreview] = useState<string | null>(null);
   const wantedRef = useRef<number | null>(null);
@@ -1079,8 +960,6 @@ function SeekBar({
   );
 }
 
-/// Qualidade pela LARGURA (release com corte cinema tipo 1920x800 continua
-/// sendo "1080p"); sem arquivo, cai pro que o nome do release diz.
 function qualityLabel(probe: MediaProbe | undefined, releaseName: string | null): string | null {
   if (probe && probe.width > 0) {
     if (probe.width >= 3800) return "4K";
@@ -1093,8 +972,6 @@ function qualityLabel(probe: MediaProbe | undefined, releaseName: string | null)
   return match ? match[1].toLowerCase().replace("4k", "4K") : null;
 }
 
-/// Nomes únicos, filtrados pelo idioma preferido (japonês sempre passa),
-/// com a tag de qualificador (Forced etc.) quando tiver.
 function trackChips(tracks: ProbeTrack[], preferred: string[]): { label: string; original: boolean; tag: string | null }[] {
   const seen = new Set<string>();
   const out: { label: string; original: boolean; tag: string | null }[] = [];
@@ -1111,8 +988,6 @@ function trackChips(tracks: ProbeTrack[], preferred: string[]): { label: string;
   return out;
 }
 
-// Sobrevivem a fechar/abrir o painel (a overlay nunca remonta) — reabrir
-// um episódio não relê o arquivo de novo.
 const probeCache = new Map<string, MediaProbe>();
 const thumbCache = new Map<string, string>();
 
@@ -1146,7 +1021,6 @@ function EpisodeDetails({
         if (cancelled) return;
         setProbe(p);
         if (!thumbCache.has(source) && p.duration_ms > 0) {
-          // 30% do episódio: longe da abertura/tela preta do começo.
           const url = await mediaFrame(source, p.duration_ms * 0.3);
           thumbCache.set(source, url);
           if (!cancelled) setThumb(url);
@@ -1249,10 +1123,6 @@ function ChipRow({ label, chips }: { label: string; chips: { label: string; orig
   );
 }
 
-/// Painel deslizante da direita, estilo Netflix — episódios do mesmo watch
-/// (ver `NowPlaying.watch_id`) em sanfona: clicar abre imagem do episódio,
-/// status, qualidade e áudio/legenda (lidos do próprio arquivo, filtrados
-/// pelo idioma preferido). Play na imagem troca a mídia tocando.
 function EpisodesPanel({
   open,
   watchId,
@@ -1271,9 +1141,6 @@ function EpisodesPanel({
   const { t } = useTranslation();
   const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [expandedId, setExpandedId] = useState<number | null>(null);
-  // Precisa do título CRU do watch (com "Season N" ainda dentro) pra montar
-  // H1/H2 igual `formatPlayerTitle` espera — `snapshot.title` já vem sem a
-  // season (é a SAÍDA desse mesmo formatador), não dá pra reaproveitar.
   const { data: watches = [] } = useQuery({
     queryKey: ["watches"],
     queryFn: listWatches,
@@ -1294,7 +1161,6 @@ function EpisodesPanel({
     .slice()
     .sort((a, b) => (numberOf(a) ?? 0) - (numberOf(b) ?? 0));
 
-  // Ao abrir o painel, já expande o episódio que está tocando (igual Netflix).
   useEffect(() => {
     if (!open) return;
     const current = sorted.find((e) => currentEpisode != null && numberOf(e) === currentEpisode);
@@ -1382,10 +1248,6 @@ function EpisodesPanel({
   );
 }
 
-/// Botão de legenda/áudio na barra de baixo — popover com as 2 listas
-/// (carregadas só quando abre), filtradas pelo idioma preferido (Config >
-/// Reprodução) quando configurado — repack costuma vir com 10+ faixa
-/// embutida, sem isso a lista fica enorme e inútil.
 function TrackPickerButton({
   preferredAudio,
   preferredSubtitle,
@@ -1396,11 +1258,8 @@ function TrackPickerButton({
 }: {
   preferredAudio: string[];
   preferredSubtitle: string[];
-  /** Controlado pelo pai — só 1 menu aberto por vez (ver `openMenu`). */
   open: boolean;
   setOpen: (open: boolean) => void;
-  /** Legenda personalizada ligada: faixa desenhada pelo Torii (posição entre
-   * as faixas de legenda; `null` = nenhuma). `undefined` = modo original. */
   customSubtitle?: number | null;
   onCustomSubtitle: (ordinal: number | null) => void;
 }) {
@@ -1418,14 +1277,7 @@ function TrackPickerButton({
       .catch(() => {});
   }, [open]);
 
-  // Áudio nunca mostra "Desabilitar" — silenciar o anime inteiro não faz
-  // sentido em nenhum cenário (sempre tem pelo menos o original japonês).
-  // Legenda continua podendo desabilitar (comum assistir dublado sem
-  // legenda nenhuma) — id < 0 = entrada "Desabilitado" do próprio libvlc,
-  // sempre mostra ali, não é idioma pra filtrar por preferência.
   const filteredAudio = audioTracks.filter((track) => track.id >= 0 && trackMatchesPreferred(track.name, preferredAudio));
-  // No modo personalizado a faixa "ativa" é a desenhada pelo Torii (o VLC
-  // fica sem legenda) — posição entre as faixas de legenda do arquivo.
   const realSubtitles = subtitleTracks.filter((track) => track.id >= 0);
   const customMode = customSubtitle !== undefined;
   const filteredSubtitle = subtitleTracks
@@ -1509,7 +1361,6 @@ function TrackSection({
               }`}
             >
               <span className="flex min-w-0 items-center gap-1.5">
-                {/* id < 0 = "Desabilitar" do próprio libvlc (vem em inglês). */}
                 <span className="truncate">{track.id < 0 ? t("player.disable") : humanizeTrackLanguage(track.name)}</span>
                 {original && (
                   <span className="shrink-0 rounded-full bg-primary/20 px-1.5 py-0.5 text-[9px] font-bold tracking-wide text-primary uppercase">

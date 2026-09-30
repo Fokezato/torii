@@ -25,7 +25,6 @@ function useCardSize() {
       const saved = localStorage.getItem(CARD_SIZE_STORAGE_KEY);
       if (saved === "sm" || saved === "md" || saved === "lg") setSize(saved);
     } catch {
-      // localStorage indisponível (ex. contexto privado) — mantém o padrão
     }
   }, []);
   const update = (next: CardSizeId) => {
@@ -33,7 +32,6 @@ function useCardSize() {
     try {
       localStorage.setItem(CARD_SIZE_STORAGE_KEY, next);
     } catch {
-      // best-effort, sem problema se não persistir
     }
   };
   return [size, update] as const;
@@ -67,8 +65,6 @@ export default function Library() {
 
   const groups = useMemo(() => groupBySeries(data ?? []), [data]);
 
-  // Play no card: continua de onde parou (1º episódio baixado e não
-  // assistido). Nada baixado ainda → abre a página do anime.
   const [playingKey, setPlayingKey] = useState<string | null>(null);
   async function playGroup(g: WatchGroup) {
     if (playingKey) return;

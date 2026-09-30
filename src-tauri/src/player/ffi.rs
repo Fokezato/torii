@@ -1,16 +1,3 @@
-//! Bindings finas pro subconjunto da API C do libvlc que o player usa.
-//!
-//! Não usa os crates `vlc-rs`/`libvlc-sys` (abandonados desde 2018/2019, ver
-//! discussão que motivou essa escolha) — a API C do libvlc é pequena e
-//! estável há anos pra esse uso básico (abrir mídia, embutir em HWND,
-//! play/pause/seek/volume), então declarar só o que precisa é mais robusto
-//! que herdar 2 dependências mortas.
-//!
-//! Carregado via `libloading` (LoadLibrary em runtime) em vez de link
-//! estático: o .dll oficial da VideoLAN não vem com `.lib` de import pra
-//! MSVC, só o .dll em si — `libloading` contorna isso resolvendo cada
-//! símbolo por nome depois de carregar.
-
 use libloading::{Library, Symbol};
 use std::ffi::c_void;
 use std::os::raw::{c_char, c_int};
@@ -30,7 +17,6 @@ type FnPlayerRelease = unsafe extern "C" fn(*mut LibvlcMediaPlayer);
 type FnPlayerSetMedia = unsafe extern "C" fn(*mut LibvlcMediaPlayer, *mut LibvlcMedia);
 #[cfg(windows)]
 type FnPlayerSetWindow = unsafe extern "C" fn(*mut LibvlcMediaPlayer, *mut c_void);
-/// `libvlc_media_player_set_xwindow` (XID de 32 bits).
 #[cfg(not(windows))]
 type FnPlayerSetWindow = unsafe extern "C" fn(*mut LibvlcMediaPlayer, u32);
 type FnPlayerPlay = unsafe extern "C" fn(*mut LibvlcMediaPlayer) -> c_int;
@@ -67,17 +53,13 @@ type FnVideoSetCallbacks = unsafe extern "C" fn(
     *mut c_void,
 );
 type FnVideoSetFormat = unsafe extern "C" fn(*mut LibvlcMediaPlayer, *const c_char, u32, u32, u32);
-/// (player, nº do vídeo, &largura, &altura) — 0 = ok.
 type FnVideoGetSize = unsafe extern "C" fn(*mut LibvlcMediaPlayer, u32, *mut u32, *mut u32) -> c_int;
 
-/// `libvlc_media_track_t` (libvlc 3.x). `u` é a union de ponteiros
-/// (áudio/vídeo/legenda) — só lida como vídeo quando `i_type == 1`.
 #[repr(C)]
 pub struct LibvlcMediaTrack {
     pub i_codec: u32,
     pub i_original_fourcc: u32,
     pub i_id: c_int,
-    /// -1 desconhecido, 0 áudio, 1 vídeo, 2 legenda.
     pub i_type: c_int,
     pub i_profile: c_int,
     pub i_level: c_int,
@@ -87,18 +69,12 @@ pub struct LibvlcMediaTrack {
     pub psz_description: *mut c_char,
 }
 
-/// Começo de `libvlc_video_track_t` — só os 2 primeiros campos são lidos.
 #[repr(C)]
 pub struct LibvlcVideoTrack {
     pub i_height: u32,
     pub i_width: u32,
 }
 
-/// Lista ligada (`p_next`) devolvida por `*_get_track_description`/
-/// `video_get_spu_description` — 1 nó por faixa de áudio/legenda
-/// disponível. `i_id` é o que `audio_set_track`/`video_set_spu` espera de
-/// volta; `i_id == -1` é sempre "Desabilitado" (legenda off / áudio mudo),
-/// já vem nessa lista, não precisa tratar à parte.
 #[repr(C)]
 pub struct LibvlcTrackDescription {
     pub i_id: c_int,
@@ -106,10 +82,6 @@ pub struct LibvlcTrackDescription {
     pub p_next: *mut LibvlcTrackDescription,
 }
 
-/// Ponteiros resolvidos uma vez no load; `VlcApi` é só um bag de function
-/// pointers `Copy`, sem lifetime pra carregar — o `Library` que os originou
-/// fica vivo dentro de `PlayerEngine` (ver `mod.rs`) pelo tempo todo que a
-/// API é usada, então os símbolos continuam válidos.
 #[derive(Clone, Copy)]
 pub struct VlcApi {
     pub new: FnNew,
@@ -156,9 +128,6 @@ macro_rules! sym {
     }};
 }
 
-/// # Safety
-/// `lib` precisa ser um `libvlc.dll` de verdade (ABI compatível) — chamar
-/// isso contra qualquer outra DLL é UB no primeiro uso de um símbolo.
 pub unsafe fn load(lib: &Library) -> Result<VlcApi, String> {
     Ok(VlcApi {
         new: sym!(lib, b"libvlc_new\0"),
@@ -202,7 +171,6 @@ pub unsafe fn load(lib: &Library) -> Result<VlcApi, String> {
     })
 }
 
-/// `libvlc_state_t` (subconjunto relevante pro front — o resto vira "outro").
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum VlcState {

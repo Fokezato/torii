@@ -1,15 +1,9 @@
 import { emit, listen } from "@tauri-apps/api/event";
 
-/// Luz ambiente do player (ver components/player/AmbientLight). Salvo nas
-/// configurações como `player_ambient_*`; o painel do player (janela de
-/// controles) avisa a página do player por evento pra mudar na hora.
 export interface AmbientSettings {
   enabled: boolean;
-  /** Opacidade do brilho, 0–100. */
   intensity: number;
-  /** Quanto o brilho passa da imagem, em % do vídeo (110–180). */
   size: number;
-  /** Suavidade da troca de cor, 0 (instantâneo) – 100 (bem lento). */
   smoothness: number;
 }
 

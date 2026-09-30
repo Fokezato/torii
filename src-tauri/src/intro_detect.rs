@@ -1,18 +1,3 @@
-//! Detecção local de abertura/encerramento, pra completar o AniSkip (que é
-//! colaborativo e tem muito buraco). Duas fontes, nessa ordem:
-//!
-//! 1. Capítulos do arquivo ("Opening", "Ending", "Credits"… — comuns em
-//!    release de Blu-ray).
-//! 2. Áudio: a abertura e o encerramento tocam a mesma música em todo
-//!    episódio da temporada. Tira uma impressão digital do áudio (estilo
-//!    Haitsma–Kalker: 32 bits por quadro, do sinal da diferença de energia
-//!    entre bandas de frequência vizinhas) do começo e do fim de cada
-//!    episódio e procura o trecho em comum com os episódios vizinhos — a
-//!    posição muda de episódio pra episódio (depende da cena de abertura),
-//!    por isso não dá pra copiar o tempo de um vizinho.
-//!
-//! Roda em segundo plano, 1 episódio por vez, e grava em `detected_segments`.
-
 use crate::{db, ffmpeg, state::AppState};
 use rustfft::{num_complex::Complex, FftPlanner};
 use std::collections::{HashMap, HashSet};
@@ -27,24 +12,17 @@ const BANDS: usize = 33;
 const BAND_LOW_HZ: f32 = 300.0;
 const BAND_HIGH_HZ: f32 = 2000.0;
 
-/// Janela analisada no começo (abertura) e no fim (encerramento).
 const HEAD_SECS: f64 = 8.0 * 60.0;
 const TAIL_SECS: f64 = 7.0 * 60.0;
-/// Tamanho aceito pra abertura/encerramento (em geral ~90s). Abaixo de 30s
-/// costuma ser vinheta de título/eyecatch repetida, não a abertura.
 const MIN_SEGMENT_SECS: f64 = 30.0;
 const MAX_SEGMENT_SECS: f64 = 150.0;
-/// Capítulo "Credits"/"Ending" costuma ir até o fim do arquivo (com a prévia).
 const MAX_CHAPTER_SECS: f64 = 180.0;
-/// Quantos episódios vizinhos comparar com cada episódio.
 const REFERENCES: usize = 2;
 
 fn frame_secs() -> f64 {
     HOP as f64 / SAMPLE_RATE as f64
 }
 
-/// Impressão digital de um trecho de áudio: 1 hash de 32 bits por quadro
-/// (~93ms) e se o quadro tem som (silêncio casa com qualquer coisa).
 pub struct Fingerprint {
     hashes: Vec<u32>,
     loud: Vec<bool>,
@@ -102,13 +80,11 @@ pub fn fingerprint(samples: &[f32]) -> Fingerprint {
             }
         }
         hashes.push(h);
-        // ~ -46 dBFS: abaixo disso é silêncio/quase silêncio.
         loud.push(n > 0 && rms[n] > 0.005);
     }
     Fingerprint { hashes, loud }
 }
 
-/// Trecho em comum mais longo entre `a` e `b`, como faixa de quadros em `a`.
 pub fn find_common(a: &Fingerprint, b: &Fingerprint) -> Option<(usize, usize)> {
     if a.hashes.is_empty() || b.hashes.is_empty() {
         return None;
@@ -120,7 +96,6 @@ pub fn find_common(a: &Fingerprint, b: &Fingerprint) -> Option<(usize, usize)> {
         }
     }
 
-    // Vota no deslocamento (i - j) de hashes iguais ou a 1 bit de diferença.
     let mut votes: HashMap<i64, u32> = HashMap::new();
     for (i, (&h, &loud)) in a.hashes.iter().zip(&a.loud).enumerate() {
         if !loud {
@@ -148,16 +123,12 @@ pub fn find_common(a: &Fingerprint, b: &Fingerprint) -> Option<(usize, usize)> {
     best
 }
 
-/// Maior sequência de quadros parecidos com `b` deslocado de `d` quadros,
-/// tolerando falhas curtas (~1s).
 fn longest_run(a: &Fingerprint, b: &Fingerprint, d: i64) -> Option<(usize, usize)> {
     const WINDOW: i64 = 4;
     const MAX_AVG_BITS: f32 = 10.0;
     const MAX_GAP: usize = 12;
 
     let n = a.hashes.len();
-    // Distância por quadro (None = sem som / fora de `b`), aceitando ±1
-    // quadro de desalinhamento.
     let dist: Vec<Option<u32>> = (0..n)
         .map(|i| {
             if !a.loud[i] {
@@ -210,7 +181,6 @@ fn longest_run(a: &Fingerprint, b: &Fingerprint, d: i64) -> Option<(usize, usize
 
 fn keep_best(best: &mut Option<(usize, usize)>, s: usize, e: usize, good_frames: usize) {
     let len = e + 1 - s;
-    // Maioria dos quadros tem que casar de verdade, não só "passar" nas falhas.
     if good_frames * 2 < len {
         return;
     }
@@ -219,7 +189,6 @@ fn keep_best(best: &mut Option<(usize, usize)>, s: usize, e: usize, good_frames:
     }
 }
 
-/// Faixa de quadros → ms absolutos, se tiver tamanho de abertura/encerramento.
 fn to_segment(range: (usize, usize), window_start_secs: f64) -> Option<(i64, i64)> {
     let start = window_start_secs + range.0 as f64 * frame_secs();
     let end = window_start_secs + (range.1 + 1) as f64 * frame_secs() + FRAME as f64 / SAMPLE_RATE as f64;
@@ -228,9 +197,6 @@ fn to_segment(range: (usize, usize), window_start_secs: f64) -> Option<(i64, i64
         .contains(&len)
         .then(|| ((start * 1000.0).round() as i64, (end * 1000.0).round() as i64))
 }
-
-// ---------------------------------------------------------------------------
-// Arquivo: decodificação do áudio, capítulos.
 
 fn decode(ffmpeg_exe: &Path, file: &Path, start: f64, len: f64) -> Result<Vec<f32>, String> {
     let out = ffmpeg::command(ffmpeg_exe)
@@ -288,9 +254,6 @@ fn chapter_segments(ffprobe: &Path, file: &Path) -> Found {
         let (Ok(start), Ok(end)) = (c.start_time.parse::<f64>(), c.end_time.parse::<f64>()) else {
             continue;
         };
-        // Marcador da Crunchyroll vira capítulo "Intro" até em episódio sem
-        // abertura (só a vinheta do título, 2–12s) — fora do tamanho de uma
-        // abertura/encerramento, ignora e deixa pro áudio.
         if !(MIN_SEGMENT_SECS..=MAX_CHAPTER_SECS).contains(&(end - start)) {
             continue;
         }
@@ -320,7 +283,6 @@ fn analyze_audio(paths: &ffmpeg::FfmpegPaths, file: &Path) -> Result<EpisodeAudi
     Ok(EpisodeAudio { head, tail, tail_start_secs })
 }
 
-/// Maior trecho em comum com os vizinhos, já no tamanho aceito.
 fn best_against(
     target: &Fingerprint,
     others: &[&Fingerprint],
@@ -333,13 +295,8 @@ fn best_against(
         .max_by_key(|(s, e)| e - s)
 }
 
-// ---------------------------------------------------------------------------
-// Fila em segundo plano.
-
 static RUNNING: AtomicBool = AtomicBool::new(false);
 
-/// Analisa em segundo plano os episódios baixados que ainda não foram
-/// analisados (ou trocaram de arquivo). Não faz nada se já estiver rodando.
 pub fn spawn_pending(app: &AppHandle) {
     if RUNNING.swap(true, Ordering::SeqCst) {
         return;
@@ -375,8 +332,6 @@ async fn run(app: &AppHandle) {
             by_watch.entry(ep.watch_id).or_default().push(Candidate { number, path });
         }
     }
-    // Precisa de pelo menos 2 episódios pra comparar; pendente = sem análise
-    // ou analisado com outro arquivo.
     let work: Vec<(i64, Vec<Candidate>, HashSet<i64>)> = by_watch
         .into_iter()
         .filter(|(_, eps)| eps.len() >= 2)
@@ -417,7 +372,6 @@ async fn run(app: &AppHandle) {
             let mut found = chapters;
 
             if found.intro.is_none() || found.ending.is_none() {
-                // Vizinhos mais próximos em número de episódio.
                 let mut refs: Vec<&Candidate> = eps.iter().filter(|e| e.number != target.number).collect();
                 refs.sort_by_key(|e| (e.number - target.number).abs());
                 refs.truncate(REFERENCES);
@@ -483,7 +437,6 @@ async fn run(app: &AppHandle) {
 mod tests {
     use super::*;
 
-    /// Ruído pseudo-aleatório determinístico (sem crate de rand).
     fn noise(seed: u32, len: usize) -> Vec<f32> {
         let mut x = seed.wrapping_mul(2654435761).max(1);
         (0..len)
@@ -502,7 +455,6 @@ mod tests {
 
     #[test]
     fn finds_shared_song_at_different_positions() {
-        // "Música" de 90s em comum, começando em 40s num episódio e 95s no outro.
         let song = noise(7, secs(90.0));
         let mut a = noise(1, secs(40.0));
         a.extend(&song);
@@ -518,8 +470,6 @@ mod tests {
         assert!((end_ms - 130_000).abs() < 1_500, "end {end_ms}");
     }
 
-    /// Manual, com arquivos de verdade:
-    /// TORII_FFMPEG_DIR=... TORII_EPISODES="a.mkv|b.mkv|c.mkv" cargo test real_episodes -- --ignored --nocapture
     #[test]
     #[ignore]
     fn real_episodes() {

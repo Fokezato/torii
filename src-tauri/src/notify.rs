@@ -11,10 +11,6 @@ struct NotifyPayload {
     sound: bool,
 }
 
-/// Checa a chave mestra ("notify_master") + a chave do tipo específico
-/// ("notify_found", "notify_error" etc.) antes de emitir — o usuário pode
-/// desligar tudo de uma vez ou só um tipo. A janela flutuante que renderiza
-/// o toast escuta o evento "notify:show" (ver src/routes/NotificationWindow).
 pub async fn notify(
     app: &AppHandle,
     state: &AppState,

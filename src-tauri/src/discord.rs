@@ -1,24 +1,12 @@
-//! Discord Rich Presence: mostra no perfil o que está tocando no player do
-//! Torii ("Assistindo <anime>", episódio, capa e tempo restante).
-//!
-//! O cliente IPC do Discord é síncrono (named pipe) e o Discord pode nem
-//! estar aberto — por isso roda numa thread própria que recebe o estado do
-//! player por canal, reconecta sozinha e só manda atualização quando algo
-//! muda de verdade (o Discord aceita poucas por minuto).
-
 use discord_rich_presence::activity::{Activity, ActivityType, Assets, Button, StatusDisplayType, Timestamps};
 use discord_rich_presence::{DiscordIpc, DiscordIpcClient};
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
-/// Application ID do app "Torii" no Discord Developer Portal — é o nome que
-/// aparece no "Assistindo Torii" e no card do perfil.
 const CLIENT_ID: &str = "1554307267120078869";
 
-/// Espera entre tentativas de conectar (Discord fechado).
 const RECONNECT_EVERY: Duration = Duration::from_secs(20);
 
-/// Diferença de posição acima disso = seek; reenvia pra corrigir o tempo restante.
 const SEEK_TOLERANCE_MS: i64 = 3_000;
 
 #[derive(Clone, PartialEq)]
@@ -54,17 +42,14 @@ impl Presence {
         let _ = self.tx.send(Msg::Enabled(enabled));
     }
 
-    /// Episódio novo aberto no player.
     pub fn open(&self, meta: Meta) {
         let _ = self.tx.send(Msg::Open(meta));
     }
 
-    /// Estado atual do player (chamado a cada snapshot — barato, a thread filtra).
     pub fn playback(&self, playing: bool, position_ms: i64, duration_ms: i64) {
         let _ = self.tx.send(Msg::Playback { playing, position_ms, duration_ms });
     }
 
-    /// Player parou/fechou.
     pub fn clear(&self) {
         let _ = self.tx.send(Msg::Clear);
     }
@@ -77,8 +62,6 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-/// O que está no Discord agora: meta + tocando/pausado + início "virtual"
-/// do episódio (agora − posição), que só muda com seek.
 #[derive(Clone, PartialEq)]
 struct Shown {
     meta: Meta,
@@ -88,7 +71,6 @@ struct Shown {
 
 fn run(rx: std::sync::mpsc::Receiver<Msg>) {
     if CLIENT_ID == "0" {
-        // Sem Application ID configurado: não tenta conectar.
         while rx.recv().is_ok() {}
         return;
     }
@@ -97,7 +79,6 @@ fn run(rx: std::sync::mpsc::Receiver<Msg>) {
     let mut enabled = true;
     let mut meta: Option<Meta> = None;
     let mut playback: Option<(bool, i64, i64)> = None;
-    // `None` = nada mostrado (ou limpo).
     let mut shown: Option<Shown> = None;
     let mut dirty = false;
 
@@ -143,7 +124,6 @@ fn run(rx: std::sync::mpsc::Receiver<Msg>) {
             continue;
         }
         if wanted.is_none() && shown.is_none() {
-            // Nada pra mostrar nem pra limpar — não precisa nem conectar.
             dirty = false;
             continue;
         }
@@ -167,8 +147,6 @@ fn run(rx: std::sync::mpsc::Receiver<Msg>) {
             Some(s) => c.set_activity(activity(s, duration)),
             None => c.clear_activity(),
         }
-        // Resposta do Discord: lida sempre (senão o pipe enche) e loga
-        // payload recusado — o envio em si "dá certo" mesmo quando recusa.
         .and_then(|()| c.recv())
         .map(|(_, reply)| {
             if reply["evt"] == "ERROR" {
@@ -182,7 +160,6 @@ fn run(rx: std::sync::mpsc::Receiver<Msg>) {
             }
             Err(e) => {
                 eprintln!("[discord] erro ao enviar: {e}");
-                // Discord fechou: reconecta depois e reenvia.
                 let _ = c.close();
                 client = None;
                 dirty = true;
@@ -203,7 +180,6 @@ fn activity(s: &Shown, duration_ms: i64) -> Activity<'_> {
     };
     let mut a = Activity::new()
         .activity_type(ActivityType::Watching)
-        // Lista de membros mostra "Assistindo <anime>" em vez de "Assistindo Torii".
         .status_display_type(StatusDisplayType::Details)
         .details(s.meta.title.as_str())
         .state(state);

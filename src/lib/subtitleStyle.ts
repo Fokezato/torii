@@ -1,20 +1,12 @@
-/// Legenda personalizada (desenhada pelo Torii, ver components/player/
-/// SubtitleLayer). Salvo nas configurações como `player_sub_*`.
 export type SubtitleFont = "sans" | "serif" | "rounded";
 
 export interface SubtitleStyle {
-  /** "original" = legenda do arquivo, desenhada pelo VLC. */
   mode: "original" | "custom";
-  /** Tamanho em % (100 = padrão). */
   size: number;
   font: SubtitleFont;
-  /** Cor do texto, "#RRGGBB". */
   color: string;
-  /** Contorno: 0 nenhum, 1 fino, 2 normal, 3 grosso. */
   outline: number;
-  /** Opacidade do fundo atrás do texto, 0–100. */
   background: number;
-  /** Altura a partir de baixo, em % da tela (0–25). */
   position: number;
 }
 
@@ -47,7 +39,6 @@ export function subtitleStyleFromSettings(s: Record<string, string>): SubtitleSt
     mode: s.player_sub_mode === "custom" ? "custom" : "original",
     size: num("player_sub_size", d.size, 50, 250),
     font: font === "serif" || font === "rounded" ? font : "sans",
-    // Amarelo antigo (pastel) vira o amarelo forte.
     color: /^#[0-9a-fA-F]{6}$/.test(s.player_sub_color ?? "")
       ? s.player_sub_color.toUpperCase() === "#FFE14D"
         ? "#FFFF00"

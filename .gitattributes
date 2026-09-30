@@ -1,4 +1,2 @@
-# Migrações do banco: o sqlx grava uma assinatura dos bytes de cada arquivo
-# no banco do usuário e recusa abrir se mudar. Sem conversão de quebra de
-# linha, pra todo build (local, CI, Linux) embutir exatamente os mesmos bytes.
+# sqlx checksums migration bytes; line-ending conversion would break existing databases.
 src-tauri/migrations/*.sql -text

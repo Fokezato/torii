@@ -1,19 +1,14 @@
 use serde::Serialize;
 use sqlx::{FromRow, SqlitePool};
 
-/// Trechos de abertura/encerramento de 1 episódio, em ms — `None` num campo
-/// = esse trecho não existe/não foi achado (não é erro, ver `aniskip.rs`).
 #[derive(Debug, Clone, Default, Serialize, FromRow)]
 pub struct SkipSegments {
     pub intro_start_ms: Option<i64>,
     pub intro_end_ms: Option<i64>,
     pub ending_start_ms: Option<i64>,
     pub ending_end_ms: Option<i64>,
-    /// Resumo do episódio anterior.
     pub recap_start_ms: Option<i64>,
     pub recap_end_ms: Option<i64>,
-    /// Abertura/encerramento "misto" do AniSkip (créditos por cima de cenas
-    /// do episódio): o player mostra o botão mas não pula sozinho.
     #[sqlx(default)]
     pub intro_mixed: bool,
     #[sqlx(default)]
@@ -21,12 +16,10 @@ pub struct SkipSegments {
 }
 
 impl SkipSegments {
-    /// Abertura e encerramento achados — não vale a pena perguntar de novo.
     pub fn is_complete(&self) -> bool {
         self.intro_start_ms.is_some() && self.ending_start_ms.is_some()
     }
 
-    /// Completa o que faltar com os trechos detectados localmente.
     pub fn fill_from(&mut self, detected: &SkipSegments) {
         if self.intro_start_ms.is_none() {
             self.intro_start_ms = detected.intro_start_ms;
@@ -46,7 +39,6 @@ struct CachedRow {
     fetched_at: String,
 }
 
-/// Trechos em cache + quando foram buscados.
 pub async fn get_cached(
     pool: &SqlitePool,
     watch_id: i64,
@@ -107,8 +99,6 @@ pub async fn upsert(
     Ok(())
 }
 
-/// Trechos detectados localmente (ver `intro_detect`), se o episódio já foi
-/// analisado.
 pub async fn get_detected(
     pool: &SqlitePool,
     watch_id: i64,
@@ -125,7 +115,6 @@ pub async fn get_detected(
     .await
 }
 
-/// (watch, episódio) → arquivo que foi analisado.
 pub async fn detected_paths(
     pool: &SqlitePool,
 ) -> Result<std::collections::HashMap<(i64, i64), String>, sqlx::Error> {

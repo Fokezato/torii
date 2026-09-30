@@ -6,9 +6,7 @@ import { statusLabel } from "@/lib/constants";
 
 interface AnimeCardProps {
   anime: AnimeSummary;
-  /** "+ Adicionar" (hover): abre o formulário de adicionar à biblioteca. */
   onAdd?: () => void;
-  /** "Detalhes" (hover): abre as informações do anime. */
   onDetails?: () => void;
 }
 

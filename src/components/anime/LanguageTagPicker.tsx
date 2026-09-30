@@ -7,14 +7,6 @@ import { languageOptions } from "@/lib/constants";
 interface LanguageTagPickerProps {
   selected: string[];
   onChange: (values: string[]) => void;
-  /**
-   * Idiomas que de fato apareceram em torrents desse anime (ver
-   * nyaa_available_languages). Quando presente e não-vazio, a lista mostra
-   * só essas opções — não faz sentido oferecer 17 idiomas genéricos se só
-   * 3 têm torrent de verdade, isso só induz a escolher algo que não existe.
-   * `undefined`/vazio = ainda carregando ou detecção falhou: cai pra lista
-   * genérica completa em vez de mostrar um seletor vazio.
-   */
   available?: string[];
 }
 

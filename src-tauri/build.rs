@@ -5,14 +5,7 @@ fn main() {
     copy_vlc_runtime();
 }
 
-/// `libvlc.dll` procura a pasta "plugins" do lado dele em runtime — sem
-/// ficar junto do .exe, `LoadLibraryW("libvlc.dll")` até carrega, mas o
-/// player não acha nenhum plugin (codec/demux/vout) e não toca nada. Copia
-/// pra `target/<profile>/` (mesma pasta do binário) a cada build; barato
-/// (skip se já igual) e funciona em dev e release sem depender do sistema
-/// de resources do Tauri, que só se aplica no instalador empacotado.
 fn copy_vlc_runtime() {
-    // Linux usa o libVLC do sistema; o vendorizado é só do Windows.
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
         return;
     }
@@ -22,8 +15,6 @@ fn copy_vlc_runtime() {
         return;
     }
 
-    // OUT_DIR = target/<profile>/build/<pkg>-<hash>/out — target/<profile>/
-    // fica 3 níveis acima, onde o .exe realmente é gerado.
     let out_dir = std::env::var("OUT_DIR").unwrap();
     let dest = Path::new(&out_dir)
         .ancestors()

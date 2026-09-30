@@ -1,16 +1,4 @@
-// Publica um release compilado pelo GitHub Actions (.github/workflows/build.yml):
-//
-//   npm run release:sign -- v0.5.0
-//
-// Baixa os instaladores do release RASCUNHO da tag, assina localmente os
-// que o atualizador usa (instalador do Windows e AppImage do Linux), gera o
-// latest.json com as duas plataformas, sobe as assinaturas e publica o
-// release como normal (não pré-lançamento — o link
-// releases/latest/download/latest.json ignora pré-lançamentos).
-//
-// A chave privada fica só nesta máquina: TORII_UPDATER_KEY (caminho) ou
-// ~/.tauri/torii-updater.key. Senha em TAURI_SIGNING_PRIVATE_KEY_PASSWORD.
-
+// Signs the CI draft release, writes latest.json and publishes it. Usage: npm run release:sign -- vX.Y.Z
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -55,8 +43,6 @@ const targets = {
 const platforms = {};
 for (const [platform, name] of Object.entries(targets)) {
   const file = join(dir, name);
-  // Chave e senha por variável de ambiente: no Windows (shell) um argumento
-  // vazio — senha em branco — some da linha de comando.
   execFileSync("npx", ["tauri", "signer", "sign", file], {
     stdio: "inherit",
     shell,

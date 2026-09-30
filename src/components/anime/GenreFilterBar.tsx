@@ -3,7 +3,6 @@ import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { genreLabel } from "@/lib/constants";
 
-/// Valor do filtro "todos os gêneros" (o rótulo vem da tradução).
 export const ALL_GENRES = "__all__";
 
 interface GenreFilterBarProps {

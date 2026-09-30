@@ -1,11 +1,3 @@
-//! Assistir enquanto baixa: servidor HTTP local que entrega o episódio
-//! direto do motor de torrent. O libVLC abre a URL como qualquer vídeo
-//! online; pular pra frente vira pedido de faixa (`Range`), e o librqbit
-//! prioriza os pedaços perto de onde o player está lendo.
-//!
-//! Só escuta em 127.0.0.1 e exige um token aleatório no caminho — nada de
-//! fora do PC (nem outra página no navegador) acessa sem ele.
-
 use crate::state::AppState;
 use axum::body::Body;
 use axum::extract::{Path, State};
@@ -25,15 +17,11 @@ pub struct StreamServer {
 }
 
 impl StreamServer {
-    /// URL do episódio pro player. A extensão ajuda o VLC a escolher o
-    /// leitor certo antes de ler o arquivo.
     pub fn url(&self, episode_id: i64, extension: &str) -> String {
         format!("http://127.0.0.1:{}/stream/{}/{episode_id}.{extension}", self.port, self.token)
     }
 }
 
-/// Episódio que a URL de stream aponta (pra não pós-processar um arquivo
-/// que está sendo assistido por stream).
 pub fn episode_of_url(url: &str) -> Option<i64> {
     if !url.starts_with("http://127.0.0.1:") || !url.contains("/stream/") {
         return None;
@@ -42,7 +30,6 @@ pub fn episode_of_url(url: &str) -> Option<i64> {
 }
 
 fn random_token() -> String {
-    // 128 bits do gerador aleatório do próprio std (sementes por processo).
     let mut out = String::new();
     for i in 0..2u64 {
         let mut h = std::collections::hash_map::RandomState::new().build_hasher();
@@ -67,7 +54,6 @@ pub async fn start(app: AppHandle) -> anyhow::Result<StreamServer> {
     Ok(server)
 }
 
-/// "bytes=início-fim" / "bytes=início-" / "bytes=-últimos" → (início, fim) inclusivo.
 fn parse_range(value: &str, len: u64) -> Option<(u64, u64)> {
     let spec = value.strip_prefix("bytes=")?.split(',').next()?.trim();
     let (a, b) = spec.split_once('-')?;

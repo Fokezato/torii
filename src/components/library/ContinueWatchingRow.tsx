@@ -10,23 +10,17 @@ import { formatPlayerTitle, parseEpisodeLabel, parseSeasonFromTitle } from "@/li
 import { mediaFrame, mediaProbe } from "@/lib/player";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 
-// Menos que isso de progresso não conta como "começou a ver".
 const MIN_STARTED_MS = 5_000;
-// Quadro da miniatura do próximo episódio: depois da abertura, em geral.
 const NEXT_EPISODE_FRAME_MS = 150_000;
 
 interface ContinueItem {
   key: string;
   watch: Watch;
   episode: Episode;
-  /** true = já terminou o anterior, esse ainda não começou. */
   upNext: boolean;
   activityAt: number;
 }
 
-/// Um item por anime (todas as temporadas juntas): o episódio parado no
-/// meio, ou o próximo baixado depois do último assistido. Do mais recente
-/// pro mais antigo.
 function buildItems(groups: WatchGroup[], episodes: Episode[]): ContinueItem[] {
   const byWatch = new Map<number, Episode[]>();
   for (const ep of episodes) {
@@ -84,7 +78,6 @@ function ContinueCard({ item }: { item: ContinueItem }) {
     staleTime: Infinity,
     retry: false,
   });
-  // Arredonda pra reaproveitar o cache de quadros do Rust entre visitas.
   const frameAt = upNext ? NEXT_EPISODE_FRAME_MS : Math.floor(position / 10_000) * 10_000;
   const { data: frame } = useQuery({
     queryKey: ["media-frame", path, frameAt],

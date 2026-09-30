@@ -35,8 +35,6 @@ futures = "0.3"
 quick-xml = { version = "0.36", features = ["serialize"] }
 urlencoding = "2"
 tokio = { version = "1", features = ["time", "sync", "net", "io-util"] }
-# Servidor local do "assistir enquanto baixa" (ver src/stream_server.rs) —
-# já vinham como dependência do librqbit.
 axum = "0.8"
 tokio-util = { version = "0.7", features = ["io"] }
 librqbit = "9"
@@ -53,7 +51,6 @@ tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 discord-rich-presence = "1.1.0"
 
-# Linux: janela X11 do vídeo (ver src/player/window/linux_impl.rs).
 [target.'cfg(target_os = "linux")'.dependencies]
 x11 = { version = "2", features = ["xlib"] }
 raw-window-handle = "0.6"
@@ -66,18 +63,13 @@ windows = { version = "0.62", features = [
     "Win32_Graphics_Gdi",
     "Win32_System_LibraryLoader",
     "Win32_Globalization",
-    # Controle de mídia do Windows (teclas de mídia + painel de mídia do
-    # sistema) pro player — ver src/player/media_session.rs.
     "Win32_System_WinRT",
     "Media",
     "Foundation",
 ] }
 
 
-# line-tables-only mantém file:line em panic/backtrace (é o que usamos pra
-# debugar esse projeto inteiro, via eprintln!/erro) mas corta a maior parte
-# do peso de símbolo de debug completo (tipo/variável) que ninguém usa sem
-# debugger de verdade — profile dev tava em 40GB só de acumular rebuild.
+# Keeps file:line in panics without full debug info (dev builds grew to 40GB).
 [profile.dev]
 debug = "line-tables-only"
 

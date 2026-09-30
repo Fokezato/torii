@@ -1,7 +1,5 @@
 import { t, tDynamic } from "@/i18n";
 
-// Valores canônicos (os mesmos gravados no banco e usados na busca do
-// Nyaa); o rótulo mostrado vem da tradução (`languages.*`).
 const LANGUAGE_VALUES = [
   "any",
   "Japanese",
@@ -45,24 +43,20 @@ export function qualityLabel(value: string): string {
   return qualityOptions().find((q) => q.value === value)?.label ?? value;
 }
 
-/// Status de exibição na AniList (FINISHED, RELEASING...).
 export function statusLabel(status: string): string {
   return tDynamic(`animeStatus.${status}`, status);
 }
 
-/// Estação do ano da AniList (WINTER, SPRING...).
 export function seasonLabel(season: string): string {
   return tDynamic(`seasons.${season}`, season);
 }
 
-/// Status do episódio no banco (pending, downloading, available...).
 export function episodeStatusLabel(status: string): string {
   return tDynamic(`episodeStatus.${status}`, status);
 }
 
 const LIST_STATUS_VALUES = ["watching", "downloaded", "completed", "planning"] as const;
 
-/// Status do anime na lista do usuário (Assistindo, Baixado...).
 export function listStatusLabel(status: string): string {
   return tDynamic(`listStatus.${status}`, status);
 }
@@ -71,7 +65,6 @@ export function listStatusOptions(): { value: string; label: string }[] {
   return LIST_STATUS_VALUES.map((value) => ({ value, label: listStatusLabel(value) }));
 }
 
-/// Gênero da AniList traduzido (gênero desconhecido aparece como veio).
 export function genreLabel(genre: string): string {
   return tDynamic(`genres.${genre}`, genre);
 }

@@ -1,10 +1,4 @@
-// Linux usa o ffmpeg do sistema: o download/extração só existe no Windows.
 #![cfg_attr(not(windows), allow(dead_code, unused_imports))]
-//! ffmpeg/ffprobe baixados SOB DEMANDA (só quando o usuário liga uma opção
-//! que precisa deles — ver `audio_strip`), em vez de irem no instalador
-//! (~80MB a mais pra quem nunca usa). Build LGPL "shared" do BtbN
-//! (github.com/BtbN/FFmpeg-Builds), conferida pelo SHA-256 que o próprio
-//! release publica. Fica em `%LOCALAPPDATA%\com.torii.app\tools\ffmpeg\bin`.
 
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -13,9 +7,6 @@ use tauri::{AppHandle, Manager};
 use tokio::io::AsyncWriteExt;
 
 const RELEASE_BASE: &str = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/";
-// 8.1, não 9.0: o 9.0 exige NVENC API 13.1 (driver NVIDIA 610+) e falhou
-// ao vivo numa RTX 3060 Ti com driver 595 — o 8.1 funciona com drivers
-// bem mais antigos, e a redução de resolução depende do NVENC.
 const ZIP_NAME: &str = "ffmpeg-n8.1-latest-win64-lgpl-shared-8.1.zip";
 
 #[derive(Debug, Clone)]
@@ -28,7 +19,6 @@ pub struct FfmpegPaths {
 pub struct InstallStatus {
     pub installed: bool,
     pub downloading: bool,
-    /// 0–100 enquanto baixa.
     pub progress: f32,
     pub error: Option<String>,
 }
@@ -49,12 +39,8 @@ fn paths_in(dir: &Path) -> FfmpegPaths {
     }
 }
 
-/// Arquivo ao lado do bin com o nome do pacote instalado — trocar
-/// `ZIP_NAME` (ex. 9.0 → 8.1) faz a próxima instalação substituir a antiga
-/// em vez de seguir usando a versão errada.
 const VERSION_FILE: &str = "installed.txt";
 
-/// Linux: ffmpeg/ffprobe do sistema (gerenciador de pacotes), pelo PATH.
 #[cfg(not(windows))]
 fn system_ffmpeg() -> Option<FfmpegPaths> {
     let found = |name: &str| {
@@ -95,14 +81,11 @@ fn set_status(f: impl FnOnce(&mut InstallStatus)) {
     f(&mut STATUS.lock().unwrap());
 }
 
-/// Garante ffmpeg instalado, baixando se preciso. Chamadas concorrentes
-/// esperam o mesmo download em vez de baixar 2x.
 pub async fn ensure_installed(app: &AppHandle, http: &reqwest::Client) -> Result<FfmpegPaths, String> {
     let _guard = INSTALL_LOCK.lock().await;
     if let Some(paths) = installed(app) {
         return Ok(paths);
     }
-    // Linux: sem download — o ffmpeg vem do sistema.
     #[cfg(not(windows))]
     {
         let _ = http;
@@ -130,8 +113,6 @@ pub async fn ensure_installed(app: &AppHandle, http: &reqwest::Client) -> Result
 async fn download_and_extract(app: &AppHandle, http: &reqwest::Client) -> Result<FfmpegPaths, String> {
     let dir = tools_dir(app)?;
     tokio::fs::create_dir_all(&dir).await.map_err(|e| e.to_string())?;
-    // Versão anterior (outro ZIP_NAME) — sai inteira antes da nova entrar,
-    // pra não misturar DLL de versões diferentes.
     let _ = tokio::fs::remove_dir_all(dir.join("bin")).await;
     let _ = tokio::fs::remove_file(dir.join(VERSION_FILE)).await;
 
@@ -191,8 +172,6 @@ async fn download_and_extract(app: &AppHandle, http: &reqwest::Client) -> Result
     installed(app).ok_or_else(|| tr!("ffmpeg.exe/ffprobe.exe não vieram no pacote", "ffmpeg.exe/ffprobe.exe missing from the package"))
 }
 
-/// Extrai só `*/bin/*` (ffmpeg, ffprobe e DLLs) — o resto do pacote
-/// (headers, docs, ffplay) não é usado.
 fn extract_bin(zip_path: &Path, dir: &Path) -> Result<(), String> {
     let file = std::fs::File::open(zip_path).map_err(|e| e.to_string())?;
     let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
@@ -215,8 +194,6 @@ fn extract_bin(zip_path: &Path, dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Processo do ffmpeg/ffprobe sem janela de console e com prioridade
-/// abaixo do normal — roda em segundo plano sem disputar CPU com o player.
 pub fn command(program: &Path) -> std::process::Command {
     #[cfg_attr(not(windows), allow(unused_mut))]
     let mut cmd = std::process::Command::new(program);

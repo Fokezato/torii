@@ -6,10 +6,6 @@ fn sanitize(name: &str) -> String {
     name.chars().filter(|c| !FORBIDDEN_CHARS.contains(c)).collect()
 }
 
-/// Palavras de qualidade/codec/fonte/grupo que não têm nada a ver com o
-/// título do episódio — assim que uma bate, para de coletar palavras pro
-/// título. Cada uma é o token INTEIRO após separar por ponto/underscore/
-/// espaço (por isso "h.264" vira "h" + "264" e precisa das duas entradas).
 const JUNK_TOKEN: &str = r"(?ix)^(
     1080p|720p|480p|2160p|4k|
     web-?dl|webrip|bluray|bdrip|brrip|hdtv|
@@ -19,11 +15,6 @@ const JUNK_TOKEN: &str = r"(?ix)^(
     cr|nf|amzn|bili|abema|hidive|v\d+
 )$";
 
-/// Deriva um nome de arquivo limpo tipo "Nome do Anime S03E01 Título do
-/// Episódio.mkv" a partir do nome cru de release (cheio de tag de
-/// qualidade/codec/grupo). Devolve `None` se não achar um "SxxEyy" no nome
-/// cru — nesse caso quem chama deve manter o nome original em vez de
-/// arriscar um resultado sem sentido.
 pub fn clean_episode_filename(base_title: &str, raw_filename: &str) -> Option<String> {
     let (stem, ext) = raw_filename.rsplit_once('.').unwrap_or((raw_filename, "mkv"));
 
@@ -54,8 +45,6 @@ mod tests {
 
     #[test]
     fn strips_quality_codec_and_group_tags() {
-        // Nomes reais de arquivo baixados nessa sessão (não títulos de RSS —
-        // o arquivo de verdade dentro do torrent, que é o que precisa limpar).
         let cases = [
             (
                 "Mushoku.Tensei.Jobless.Reincarnation.S03E01.Burn.Bright.Mad.Dog.1080p.CR.WEB-DL.MULTi.AAC2.0.H.264.MSubs-ToonsHub.mkv",

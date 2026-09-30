@@ -1,8 +1,7 @@
 name: Build
 
-# Compila Windows e Linux a cada push/PR. Em tag v*, anexa os instaladores
-# num release RASCUNHO — a assinatura do atualizador é feita localmente
-# (scripts/sign-release.mjs), então a chave privada nunca vai pro GitHub.
+# Tags attach unsigned installers to a draft release; updater signing and
+# publishing happen locally (scripts/sign-release.mjs).
 
 on:
   push:
@@ -22,7 +21,7 @@ jobs:
         include:
           - os: windows-latest
             name: windows
-          # Base antiga de propósito: o AppImage roda em distros com glibc >= a dela.
+          # Oldest supported glibc for the AppImage.
           - os: ubuntu-22.04
             name: linux
     runs-on: ${{ matrix.os }}
@@ -52,9 +51,7 @@ jobs:
         run: npx tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}'
         shell: bash
 
-      # A libwayland do Ubuntu 22.04 embutida no AppImage quebra o WebKit em
-      # distros com Mesa mais novo (EGL_BAD_PARAMETER, janela em branco —
-      # visto no Bazzite). A do sistema é compatível: tira e remonta.
+      # Bundled libwayland breaks WebKit on newer Mesa (EGL_BAD_PARAMETER).
       - name: Drop bundled libwayland from the AppImage
         if: matrix.name == 'linux'
         working-directory: src-tauri/target/release/bundle/appimage

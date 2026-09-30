@@ -7,14 +7,10 @@ type Phase = "idle" | "checking" | "available" | "downloading" | "error" | "upTo
 interface UpdateState {
   phase: Phase;
   update: Update | null;
-  /** 0–100 durante o download. */
   progress: number;
   error: string | null;
-  /** "Depois" — some até a próxima checagem manual ou reabrir o app. */
   dismissed: boolean;
-  /** Procura versão nova na última release do GitHub. */
   checkNow: () => Promise<void>;
-  /** Baixa, instala e reinicia o Torii. */
   install: () => Promise<void>;
   dismiss: () => void;
 }

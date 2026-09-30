@@ -1,16 +1,7 @@
-//! Linux: janela X11 filha da janela principal, passada pro libvlc
-//! (`libvlc_media_player_set_xwindow`). Só funciona em X11 — no Wayland não
-//! dá pra embutir janela de outro processo/lib; por isso o app força o
-//! backend X11 do GTK (XWayland) na inicialização (ver `lib.rs::run`).
-//!
-//! Usa uma conexão Xlib própria (não a do GTK), protegida por mutex — assim
-//! não depende de `XInitThreads` nem disputa a fila de eventos do GTK.
-
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::sync::{Mutex, OnceLock};
 use x11::xlib;
 
-/// XID da janela.
 pub type Surface = u64;
 
 pub fn to_raw(surface: Surface) -> isize {
@@ -22,14 +13,12 @@ pub fn from_raw(raw: isize) -> Surface {
 }
 
 struct Display(*mut xlib::Display);
-// SAFETY: o ponteiro só é usado com o mutex travado (uma thread por vez).
 unsafe impl Send for Display {}
 
 static DISPLAY: OnceLock<Mutex<Display>> = OnceLock::new();
 
 fn with_display<R>(f: impl FnOnce(*mut xlib::Display) -> R) -> Option<R> {
     let conn = DISPLAY.get_or_init(|| {
-        // SAFETY: NULL = display do $DISPLAY.
         Mutex::new(Display(unsafe { xlib::XOpenDisplay(std::ptr::null()) }))
     });
     let guard = conn.lock().ok()?;
@@ -37,12 +26,10 @@ fn with_display<R>(f: impl FnOnce(*mut xlib::Display) -> R) -> Option<R> {
         return None;
     }
     let result = f(guard.0);
-    // SAFETY: display válido (checado acima).
     unsafe { xlib::XFlush(guard.0) };
     Some(result)
 }
 
-/// XID da janela principal do Tauri (X11/XWayland). `None` no Wayland puro.
 pub fn main_surface(window: &tauri::WebviewWindow) -> Option<Surface> {
     match window.window_handle().ok()?.as_raw() {
         RawWindowHandle::Xlib(h) => Some(h.window as Surface),
@@ -51,7 +38,6 @@ pub fn main_surface(window: &tauri::WebviewWindow) -> Option<Surface> {
     }
 }
 
-/// Cria a janela filha, oculta até o primeiro `resize`/`set_visible`.
 pub fn create_child(parent: Surface) -> Result<Surface, String> {
     with_display(|d| unsafe {
         let screen = xlib::XDefaultScreen(d);
@@ -85,7 +71,6 @@ pub fn set_visible(surface: Surface, visible: bool) {
     });
 }
 
-/// `(x, y)` relativo à janela principal → coordenada de tela.
 pub fn client_to_screen(main: Surface, x: i32, y: i32) -> (i32, i32) {
     with_display(|d| unsafe {
         let root = xlib::XDefaultRootWindow(d);
@@ -96,9 +81,6 @@ pub fn client_to_screen(main: Surface, x: i32, y: i32) -> (i32, i32) {
     .unwrap_or((x, y))
 }
 
-/// Cores do vídeo pra luz ambiente: lê a imagem da janela do vídeo
-/// (`XGetImage`, inclui a subjanela onde o VLC desenha) e reduz pra
-/// `width` px de largura, RGBA. `None` com a janela oculta/minúscula.
 pub fn capture_colors(surface: Surface, width: u32) -> Option<(u32, u32, Vec<u8>)> {
     with_display(|d| unsafe {
         let window = surface as xlib::Window;

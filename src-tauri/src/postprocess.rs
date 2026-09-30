@@ -1,11 +1,3 @@
-//! Fila de pós-processamento de episódio baixado (beta, opt-in):
-//! 1. "Remover áudios extras" (`audio_strip`) — rápido, sem perda;
-//! 2. "Reduzir resolução" (`downscale`) — recodifica, minutos por episódio.
-//!
-//! Roda em segundo plano, 1 episódio por vez, nunca 2 rodadas em paralelo,
-//! sem travar a busca de episódios. Nunca mexe no episódio aberto no player.
-//! Cada etapa marca o episódio como feito — não reprocessa.
-
 use crate::media_file::{Outcome, ProcessError};
 use crate::{audio_strip, db, downscale, ffmpeg, state::AppState};
 use std::collections::{HashMap, HashSet};
@@ -39,9 +31,6 @@ where
         .unwrap_or_else(|e| Err(ProcessError::Permanent(e.to_string())))
 }
 
-/// MKV gravado pelo ffmpeg abre devagar no VLC (ver `mkv_fix`): regrava
-/// sem o CRC32 do índice. Conferir não precisa de ffmpeg (lê o cabeçalho);
-/// só baixa o ffmpeg se tiver arquivo pra corrigir.
 async fn fix_containers(app: &AppHandle, playing_path: Option<&str>) {
     let state = app.state::<AppState>();
     let Ok(episodes) = db::episodes::list_container_pending(&state.db).await else { return };
@@ -69,8 +58,6 @@ async fn fix_containers(app: &AppHandle, playing_path: Option<&str>) {
             }
         }
         let p = paths.clone().unwrap();
-        // Arquivo vai mudar: sai do motor de torrent antes, senão ele
-        // "consertaria" (rebaixaria) os pedaços que não batem mais.
         let _ = state.torrent.remove(ep.id, false).await;
         match run_blocking(move || crate::mkv_fix::fix(&p, &file)).await {
             Ok(_) | Err(ProcessError::Permanent(_)) => {
@@ -86,9 +73,6 @@ async fn process_pending(app: &AppHandle, playing_path: Option<String>) {
     fix_containers(app, playing_path.as_deref()).await;
     let Ok(settings) = db::settings::get_all(&state.db).await else { return };
 
-    // Regra: ligado na Config = vale pra TODOS os animes; desligado na
-    // Config = cada anime decide (opção dele, escolhida ao adicionar ou nas
-    // preferências).
     let global_strip = settings.get("strip_unused_audio").map(String::as_str) == Some("1");
     let preferred = audio_strip::parse_preferred(
         settings.get("player_preferred_audio_langs").map(String::as_str).unwrap_or(""),
@@ -96,7 +80,6 @@ async fn process_pending(app: &AppHandle, playing_path: Option<String>) {
     let global_width = downscale::max_width_for(settings.get("downscale_resolution").map(String::as_str).unwrap_or(""));
 
     let Ok(watches) = db::watches::list(&state.db).await else { return };
-    // Sem idioma preferido não tem critério pra remover áudio — pula a etapa.
     let strip_for: HashSet<i64> = watches
         .iter()
         .filter(|w| !preferred.is_empty() && (global_strip || w.strip_audio))
@@ -126,7 +109,6 @@ async fn process_pending(app: &AppHandle, playing_path: Option<String>) {
             continue;
         }
 
-        // ffmpeg só é baixado quando de fato tem episódio pra processar.
         if paths.is_none() {
             match ffmpeg::ensure_installed(app, &state.http).await {
                 Ok(p) => paths = Some(p),
@@ -138,8 +120,6 @@ async fn process_pending(app: &AppHandle, playing_path: Option<String>) {
         }
         let paths = paths.clone().unwrap();
 
-        // Arquivo trocado = hash do torrent não bate mais; sai do motor
-        // antes pra ele não "consertar" (rebaixar) o arquivo.
         let _ = state.torrent.remove(ep.id, false).await;
         let label = label_of(&ep);
 

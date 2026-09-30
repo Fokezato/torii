@@ -15,10 +15,6 @@ import {
 
 export type ReduceSizeFeature = "stripAudio" | "downscale";
 
-/// Chave de opção que mexe no arquivo sem volta: LIGAR pede confirmação
-/// (aviso de irreversível + botão Confirmar); desligar é direto — não
-/// desfaz o que já foi processado, só para de processar os próximos.
-/// `forcedOn`: ligada na Config (global) — aparece ligada e travada.
 export function IrreversibleToggle({
   feature,
   checked,
@@ -30,7 +26,6 @@ export function IrreversibleToggle({
   checked: boolean;
   onCheckedChange: (checked: boolean) => void;
   forcedOn?: boolean;
-  /** "global": vale pra todos os animes; "anime": só esse. Muda o texto do aviso. */
   scope: "global" | "anime";
 }) {
   const { t } = useTranslation();

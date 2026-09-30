@@ -1,19 +1,8 @@
-//! Skip intro/ending automático (feature "pular abertura/encerramento" do
-//! player). AniSkip (https://api.aniskip.com) indexa por episódio do
-//! MyAnimeList, não AniList — por isso o passo extra de resolver `idMal` a
-//! partir do `anilist_id` que o watch já guarda (ver
-//! `commands/player.rs::player_get_skip_segments`, que cacheia os 2 no
-//! banco pra não repetir chamada de rede em todo episódio).
-
 use crate::db::skip_segments::SkipSegments;
 use serde::Deserialize;
 
 const ANILIST_API_URL: &str = "https://graphql.anilist.co";
 
-/// Busca o `idMal` (MyAnimeList) equivalente a um `anilist_id` — os 2 IDs
-/// são de bases diferentes e nem sempre alinham. `Ok(None)` = a AniList não
-/// tem esse mapeamento pra esse anime (comum em obscuros/muito novos), não
-/// é erro de rede.
 pub async fn fetch_mal_id(client: &reqwest::Client, anilist_id: i64) -> Result<Option<i64>, String> {
     #[derive(Deserialize)]
     struct Resp {
@@ -66,11 +55,6 @@ struct AniSkipInterval {
     end_time: f64,
 }
 
-/// Busca os trechos de abertura ("op") e encerramento ("ed") de 1 episódio.
-/// AniSkip devolve 404 (ou `found: false`) quando não tem dado pra esse
-/// episódio — tratado como "sem segmentos" (`SkipSegments::default()`), não
-/// como erro, já que é o caso normal pra maioria dos animes (base é
-/// crowdsourced, cobertura incompleta).
 pub async fn fetch_skip_times(
     client: &reqwest::Client,
     mal_id: i64,
@@ -103,7 +87,6 @@ pub async fn fetch_skip_times(
                     segments.ending_end_ms = Some(end_ms);
                     segments.ending_mixed = false;
                 }
-                // Misto só entra se não tiver o normal do mesmo tipo.
                 "mixed-op" if segments.intro_start_ms.is_none() => {
                     segments.intro_start_ms = Some(start_ms);
                     segments.intro_end_ms = Some(end_ms);

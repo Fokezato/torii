@@ -1,10 +1,3 @@
-//! Info e quadros de arquivos de vídeo SEM passar pelo player principal —
-//! usado pelo painel de episódios (miniatura, áudio/legenda, qualidade de
-//! cada episódio) e pela miniatura da barra do tempo (hover estilo
-//! YouTube). Instância própria do libvlc (ver `PlayerEngine::new`); o quadro
-//! é decodificado direto pra memória (callbacks "vmem"), sem janela nem
-//! áudio, e devolvido como JPEG.
-
 use super::ffi::{LibvlcInstance, LibvlcMediaTrack, LibvlcVideoTrack, VlcApi, VlcState};
 use std::collections::HashMap;
 use std::ffi::{c_void, CStr, CString};
@@ -20,16 +13,12 @@ pub struct MediaTools {
     instance: *mut LibvlcInstance,
 }
 
-// Instância do libvlc é thread-safe (doc da VideoLAN); o `Library` que dá
-// vida aos ponteiros de `api` fica no `PlayerEngine`, vivo o app inteiro.
 unsafe impl Send for MediaTools {}
 unsafe impl Sync for MediaTools {}
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ProbeTrack {
-    /// Código de idioma como vem do arquivo ("jpn", "por", "pt-BR"...).
     pub language: String,
-    /// Nome que o release deu pra faixa ("Brazil", "Forced", "Signs"...).
     pub description: String,
 }
 
@@ -42,8 +31,6 @@ pub struct MediaProbe {
     pub subtitles: Vec<ProbeTrack>,
 }
 
-/// Um grab por vez — cada um decodifica vídeo em software; em paralelo
-/// (hover rápido na barra) só disputaria CPU com o player tocando.
 static GRAB_LOCK: Mutex<()> = Mutex::new(());
 static FRAME_CACHE: OnceLock<Mutex<HashMap<(String, i64), String>>> = OnceLock::new();
 static PROBE_CACHE: OnceLock<Mutex<HashMap<String, MediaProbe>>> = OnceLock::new();
@@ -96,8 +83,6 @@ impl MediaTools {
         Ok(probe)
     }
 
-    /// Lê duração, resolução e faixas de áudio/legenda do cabeçalho do
-    /// arquivo (preparser do libvlc), sem decodificar vídeo.
     fn probe(&self, path: &str) -> Result<MediaProbe, String> {
         let api = self.api;
         let c_path = CString::new(path).map_err(|e| e.to_string())?;
@@ -106,12 +91,10 @@ impl MediaTools {
             if media.is_null() {
                 return Err(tr!("não conseguiu abrir {path}", "couldn't open {path}"));
             }
-            // flags 0 = só local (sem rede/arte); timeout em ms.
             if (api.media_parse_with_options)(media, 0, 8000) != 0 {
                 (api.media_release)(media);
                 return Err(tr!("falha ao iniciar leitura do arquivo", "failed to start reading the file"));
             }
-            // 1 skipped, 2 failed, 3 timeout, 4 done — 0 = ainda lendo.
             let deadline = Instant::now() + Duration::from_secs(10);
             let mut status = (api.media_get_parsed_status)(media);
             while status == 0 && Instant::now() < deadline {
@@ -154,8 +137,6 @@ impl MediaTools {
         }
     }
 
-    /// Quadro do vídeo em `time_ms` como data URL JPEG (cacheado por
-    /// arquivo+tempo).
     pub fn frame_cached(&self, path: &str, time_ms: i64) -> Result<String, String> {
         let cache = FRAME_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
         let key = (path.to_string(), time_ms);
@@ -183,8 +164,6 @@ impl MediaTools {
             ":no-audio".to_string(),
             ":no-spu".to_string(),
             ":no-osd".to_string(),
-            // Decodificação por hardware entrega quadro em superfície de GPU
-            // que precisaria ser copiada de volta — em software é direto.
             ":avcodec-hw=none".to_string(),
             format!(":start-time={:.3}", time_ms.max(0) as f64 / 1000.0),
         ]
@@ -215,8 +194,6 @@ impl MediaTools {
             (api.video_set_format)(player, chroma.as_ptr(), FRAME_W, FRAME_H, FRAME_W * 4);
             (api.player_play)(player);
 
-            // Espera o 2º quadro (o 1º logo depois do seek às vezes vem
-            // cinza/incompleto); sai antes se o arquivo der erro/acabar.
             let deadline = Instant::now() + Duration::from_secs(5);
             let mut frames = slot.frames.lock().unwrap();
             while *frames < 2 && Instant::now() < deadline {
@@ -231,8 +208,6 @@ impl MediaTools {
             let got = *frames;
             drop(frames);
 
-            // stop é síncrono: depois dele nenhum callback toca mais no
-            // buffer/slot, dá pra ler e liberar com segurança.
             (api.player_stop)(player);
             (api.player_release)(player);
             (api.media_release)(media);

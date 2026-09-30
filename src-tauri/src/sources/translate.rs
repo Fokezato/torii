@@ -1,7 +1,3 @@
-//! Tradução automática das sinopses (a AniList só tem inglês). Usa o
-//! endpoint público do Google Tradutor e guarda o resultado no banco, então
-//! cada sinopse é traduzida uma vez só.
-
 use sqlx::SqlitePool;
 
 const ENDPOINT: &str = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&dt=t";
@@ -41,7 +37,6 @@ async fn fetch(http: &reqwest::Client, text: &str, target: &str) -> Result<Strin
     parse_response(&body).ok_or_else(|| "unexpected translation response".to_string())
 }
 
-/// Resposta: `[[["trecho traduzido", "trecho original", ...], ...], ...]`.
 fn parse_response(body: &serde_json::Value) -> Option<String> {
     let text: String = body
         .get(0)?
@@ -52,7 +47,6 @@ fn parse_response(body: &serde_json::Value) -> Option<String> {
     (!text.trim().is_empty()).then_some(text)
 }
 
-/// Texto traduzido pra `target` ("pt"); se falhar, devolve o original.
 pub async fn translate(http: &reqwest::Client, pool: &SqlitePool, text: &str, target: &str) -> String {
     if text.trim().is_empty() {
         return text.to_string();

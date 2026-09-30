@@ -3,9 +3,6 @@ import { useTranslation } from "react-i18next";
 import { translateText } from "@/lib/tools";
 import { cn } from "@/lib/utils";
 
-/// Texto que só existe em inglês (sinopse da AniList, notícias da ANN),
-/// traduzido pro idioma da interface. Mostra o original, meio apagado,
-/// enquanto a tradução chega; se ela falhar, fica o original.
 export function TranslatedText({
   text,
   as: Tag = "p",

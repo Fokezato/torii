@@ -16,13 +16,6 @@ fn with_engine<T>(state: &State<'_, PlayerState>, f: impl FnOnce(&PlayerEngine) 
     Ok(f(engine))
 }
 
-/// `source`: path local do Windows (episódio já baixado) ou URL http(s)
-/// (ex. servidor de streaming do librqbit, pra assistir sem esperar
-/// terminar de baixar — ver `PlayerEngine::open`). `title`/`episode_label`/
-/// `watch_id` só alimentam a barra de cima + painel de episódios do
-/// overlay (ver `NowPlaying`), não afetam o libvlc.
-/// Streaming: apaga os episódios já assistidos (menos o que está abrindo).
-/// Em segundo plano — `player_open`/`player_stop` rodam na thread principal.
 fn spawn_stream_cleanup(app: &AppHandle, playing: Option<String>) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -31,8 +24,6 @@ fn spawn_stream_cleanup(app: &AppHandle, playing: Option<String>) {
     });
 }
 
-/// Discord: episódio novo. Capa e link da AniList vêm do banco (em segundo
-/// plano — `player_open` roda na thread principal).
 fn spawn_discord_open(app: &AppHandle, title: String, episode: String, watch_id: Option<i64>) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -104,7 +95,6 @@ pub fn player_stop(app: AppHandle, state: State<'_, PlayerState>) -> Result<(), 
     if let Some(presence) = app.try_state::<crate::discord::Presence>() {
         presence.clear();
     }
-    // Parou = teclas de mídia voltam pros outros apps.
     #[cfg(any(windows, target_os = "linux"))]
     state.with_media_session(|s| s.set_active(None));
     Ok(())
@@ -115,10 +105,6 @@ pub fn player_seek(state: State<'_, PlayerState>, position_ms: i64) -> Result<()
     with_engine(&state, |e| e.seek_ms(position_ms))
 }
 
-/// `delta_ms` negativo = voltar (botão -10s), positivo = avançar (+10s).
-/// Clampa em [0, duration] — sem isso, voltar perto do início ou avançar
-/// perto do fim mandava `set_time` pra fora do range e o libvlc ignorava
-/// silenciosamente (botão parecia travado nas pontas).
 #[tauri::command]
 pub fn player_seek_relative(state: State<'_, PlayerState>, delta_ms: i64) -> Result<(), AppError> {
     with_engine(&state, |e| {
@@ -165,9 +151,6 @@ pub struct PlayerStatus {
     pub session: u64,
 }
 
-/// Falas da faixa de legenda `ordinal` (0 = primeira faixa de legenda do
-/// arquivo) pra legenda personalizada — ver `subtitles`. Baixa o ffmpeg na
-/// primeira vez, se preciso.
 #[tauri::command]
 pub async fn player_subtitle_cues(
     app: AppHandle,
@@ -183,15 +166,8 @@ pub async fn player_subtitle_cues(
         .map_err(AppError::Fetch)
 }
 
-/// Largura da amostra de cores: pequena de propósito — o brilho é todo
-/// borrado.
 const AMBIENT_FRAME_WIDTH: u32 = 64;
 
-/// Cores atuais do vídeo pra luz ambiente, em bytes: 4 × u32 LE (largura e
-/// altura da amostra, largura e altura reais do vídeo) + pixels RGBA. Lê a
-/// tela na área do vídeo (ver `window::capture_colors`) e o tamanho guardado
-/// em `PlayerState` — não toca no libvlc nem no `engine` (ver
-/// `PlayerState::video_size`). Vazio = sem vídeo.
 #[tauri::command]
 pub async fn player_ambient_frame(app: AppHandle) -> tauri::ipc::Response {
     let bytes = tauri::async_runtime::spawn_blocking(move || {
@@ -222,8 +198,6 @@ pub async fn player_ambient_frame(app: AppHandle) -> tauri::ipc::Response {
 
 #[tauri::command]
 pub fn player_snapshot(app: AppHandle, state: State<'_, PlayerState>) -> Result<PlayerStatus, AppError> {
-    // Tamanho do vídeo lido aqui (thread principal) e guardado pra luz
-    // ambiente — ver `PlayerState::video_size`.
     let (playback, size) = with_engine(&state, |e| (e.snapshot(), e.video_size()))?;
     let packed = size.map(|(w, h)| ((w as u64) << 32) | h as u64).unwrap_or(0);
     state.video_size.store(packed, std::sync::atomic::Ordering::Relaxed);
@@ -231,7 +205,6 @@ pub fn player_snapshot(app: AppHandle, state: State<'_, PlayerState>) -> Result<
         use crate::player::ffi::VlcState;
         match playback.state {
             VlcState::Stopped | VlcState::Ended | VlcState::Error => presence.clear(),
-            // Abrindo/carregando conta como tocando (senão pisca "Pausado" no início).
             state => presence.playback(state != VlcState::Paused, playback.position_ms, playback.duration_ms),
         }
     }
@@ -252,8 +225,6 @@ fn media_tools(state: &State<'_, PlayerState>) -> Result<MediaTools, AppError> {
         .ok_or_else(|| AppError::Fetch(tr!("leitor de mídia não inicializado", "media reader not initialized")))
 }
 
-/// Duração, resolução e faixas de áudio/legenda de um arquivo (painel de
-/// episódios) — lê só o cabeçalho, sem tocar. Cacheado por caminho.
 #[tauri::command]
 pub async fn media_probe(state: State<'_, PlayerState>, path: String) -> Result<MediaProbe, AppError> {
     let tools = media_tools(&state)?;
@@ -263,8 +234,6 @@ pub async fn media_probe(state: State<'_, PlayerState>, path: String) -> Result<
         .map_err(AppError::Fetch)
 }
 
-/// Quadro do arquivo em `time_ms` como data URL JPEG — miniatura do
-/// episódio e da barra do tempo. Cacheado por arquivo+tempo.
 #[tauri::command]
 pub async fn media_frame(state: State<'_, PlayerState>, path: String, time_ms: i64) -> Result<String, AppError> {
     let tools = media_tools(&state)?;
@@ -274,9 +243,6 @@ pub async fn media_frame(state: State<'_, PlayerState>, path: String, time_ms: i
         .map_err(AppError::Fetch)
 }
 
-/// Salva onde o player está no episódio (chamado a cada ~10s pela overlay)
-/// e marca "assistido" quando `watched` (chegou no encerramento/90%) — base
-/// do "apagar depois de assistir" (ver `engine::cleanup_once`).
 #[tauri::command]
 pub async fn player_save_progress(
     app_state: State<'_, AppState>,
@@ -289,11 +255,6 @@ pub async fn player_save_progress(
     Ok(())
 }
 
-/// Busca os trechos de abertura/encerramento do episódio (AniSkip, ver
-/// `sources::aniskip`) pro botão/auto-skip do player — cacheados em
-/// `skip_segments` (por watch+episódio, não por release baixada) e o
-/// `mal_id` do watch resolvido e salvo na 1ª vez (ver
-/// `db::watches::set_mal_id`), pra não repetir chamada de rede depois.
 #[tauri::command]
 pub async fn player_get_skip_segments(
     app: AppHandle,
@@ -305,22 +266,17 @@ pub async fn player_get_skip_segments(
     if !segments.is_complete() {
         match crate::db::skip_segments::get_detected(&app_state.db, watch_id, episode_number).await? {
             Some(detected) => segments.fill_from(&detected),
-            // Ainda não analisado: roda a detecção em segundo plano (vale
-            // pro próximo episódio / próxima vez que abrir).
             None => crate::intro_detect::spawn_pending(&app),
         }
     }
     Ok(segments)
 }
 
-/// Trechos do AniSkip, com cache no banco.
 async fn aniskip_segments(
     app_state: &AppState,
     watch_id: i64,
     episode_number: i64,
 ) -> Result<SkipSegments, AppError> {
-    // O AniSkip é colaborativo: trecho que falta hoje pode ser marcado por
-    // alguém depois. Resultado incompleto vale 1 dia; completo, pra sempre.
     let cached = crate::db::skip_segments::get_cached(&app_state.db, watch_id, episode_number).await?;
     if let Some((segments, fetched_at)) = &cached {
         if segments.is_complete() || chrono::Utc::now() - *fetched_at < chrono::Duration::days(1) {
@@ -329,9 +285,6 @@ async fn aniskip_segments(
     }
     let fallback = cached.map(|(segments, _)| segments).unwrap_or_default();
 
-    // Só grava no cache resposta DEFINITIVA ("não tem dado" de verdade ou os
-    // tempos). Erro de rede devolve vazio sem gravar — senão uma falha
-    // passageira marcava o episódio como "sem dados" pra sempre.
     let watch = crate::db::watches::get(&app_state.db, watch_id).await?;
     let mal_id = match (watch.mal_id, watch.anilist_id) {
         (Some(id), _) => id,
@@ -359,10 +312,6 @@ async fn aniskip_segments(
     }
 }
 
-/// Chamado pelo React a cada resize/scroll da área reservada pro vídeo
-/// (`ResizeObserver` no front) — reposiciona a child HWND nativa por cima
-/// dessa área. Coordenadas em pixels físicos da tela (já convertidas no
-/// front via `devicePixelRatio` + posição da janela).
 #[tauri::command]
 pub fn player_resize(state: State<'_, PlayerState>, x: i32, y: i32, width: i32, height: i32) -> Result<(), AppError> {
     with_engine(&state, |e| {
@@ -370,11 +319,6 @@ pub fn player_resize(state: State<'_, PlayerState>, x: i32, y: i32, width: i32, 
     })
 }
 
-/// Reafirma o z-order do vídeo sem reposicionar — ver
-/// `player::window::bring_to_front`. Chamado periodicamente pelo overlay
-/// (poll de snapshot já roda a cada ~400ms, barato piggybackar nele) porque
-/// o WebView2 pode reafirmar o PRÓPRIO z-order em momentos que um resize
-/// único não cobre (ex. overlay terminando de inicializar).
 #[tauri::command]
 #[cfg_attr(not(windows), allow(unused_variables))]
 pub fn player_bring_to_front(app: AppHandle, state: State<'_, PlayerState>) -> Result<(), AppError> {
@@ -382,9 +326,6 @@ pub fn player_bring_to_front(app: AppHandle, state: State<'_, PlayerState>) -> R
         crate::player::window::bring_to_front(e.surface());
     })?;
 
-    // Overlay logo acima da principal (ver `window::ensure_above`) — mesmo
-    // tick periódico, pra corrigir sozinho se a principal (ex. maximizada)
-    // passar por cima dela.
     #[cfg(windows)]
     if let (Some(main), Some(overlay)) = (app.get_webview_window("main"), app.get_webview_window(OVERLAY_LABEL)) {
         if let (Ok(main_hwnd), Ok(overlay_hwnd)) = (main.hwnd(), overlay.hwnd()) {
@@ -394,10 +335,6 @@ pub fn player_bring_to_front(app: AppHandle, state: State<'_, PlayerState>) -> R
     Ok(())
 }
 
-/// Tira a overlay dos controles da tela. Windows: manda pra fora da tela
-/// (esconder/mostrar a janela bagunçava a relação de owner). Linux: o
-/// gerenciador de janelas traz de volta janela fora da tela, então esconde
-/// de verdade.
 pub fn hide_overlay(overlay: &tauri::WebviewWindow) {
     #[cfg(windows)]
     let _ = overlay.set_position(PhysicalPosition::new(-32000, -32000));
@@ -412,16 +349,6 @@ pub fn player_set_visible(state: State<'_, PlayerState>, visible: bool) -> Resul
     })
 }
 
-/// Posiciona a HWND nativa do vídeo E a janela de overlay dos controles
-/// (criada 1x no boot — ver `spawn_player_overlay_window` — nunca aqui)
-/// numa chamada só — andam sempre juntas. `x/y/width/height` são
-/// relativos à área de conteúdo da janela principal (mesmo referencial da
-/// HWND filha do vídeo). A posição absoluta de tela da overlay sai desse
-/// mesmo x/y via `ClientToScreen` (Win32, ver
-/// `player::window::client_to_screen`), numa leitura só — sem depender de
-/// 2 leituras separadas da posição da janela que driftavam durante
-/// resize/move. `overlay_x/overlay_y` (calculados no front) ficam só como
-/// fallback se a HWND da janela principal não puder ser obtida.
 #[tauri::command]
 pub fn player_set_video_area(
     app: AppHandle,
@@ -434,36 +361,14 @@ pub fn player_set_video_area(
     overlay_y: i32,
     video: Option<[i32; 4]>,
 ) -> Result<(), AppError> {
-    // Minimizar a janela principal dispara "resize" no front (viewport vai
-    // pra 0x0), que chama isso aqui — sem essa guarda, reposicionava a
-    // overlay de volta pra tela por cima do fix que a manda pra fora
-    // (ver o handler de `WindowEvent::Resized` no lib.rs), race entre os
-    // dois: overlay "não sumia" ao minimizar (bug real reportado).
-    // Mesma lógica pra janela escondida na bandeja (fechar com "minimizar
-    // pra bandeja"): o timer de 1s da página continua rodando com a janela
-    // oculta e recolocaria a overlay na tela.
-    // Visibilidade derivada da área, na MESMA chamada: a página esconde a
-    // área (-2000, 1x1) ao sair e mostra ao entrar — com show/hide em
-    // chamadas separadas, o StrictMode do React (monta 2x em dev) fazia o
-    // "esconder" da desmontagem chegar por último às vezes, deixando o
-    // vídeo oculto com a página aberta (tela preta — visto no log real).
-    // Como essa função roda a cada 1s na página, corrige sozinho.
     let on_screen = width > 1 && height > 1 && x > -1000 && y > -1000;
 
-    // A guarda só barra MOSTRAR: esconder tem que passar sempre. Fechar pra
-    // bandeja com o player aberto sai da página com a janela já oculta — se
-    // o "esconder" fosse ignorado, a HWND do vídeo ficava parada por cima da
-    // interface e, ao reabrir, nada recebia clique (bug real).
     let main = app.get_webview_window("main");
     if let Some(main) = &main {
         if on_screen && (main.is_minimized().unwrap_or(false) || !main.is_visible().unwrap_or(true)) {
             return Ok(());
         }
     }
-    // `video`: retângulo só da imagem (luz ambiente ligada — o espaço em
-    // volta vira área da página, onde o brilho é desenhado). Sem ele, o
-    // vídeo ocupa a área toda e o VLC pinta as faixas pretas por dentro.
-    // Os controles (overlay) cobrem sempre a área toda.
     let [vx, vy, vw, vh] = video.unwrap_or([x, y, width, height]);
     with_engine(&state, |e| {
         crate::player::window::resize(e.surface(), vx, vy, vw, vh);

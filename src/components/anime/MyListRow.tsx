@@ -9,9 +9,6 @@ import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { statusLabel } from "@/lib/constants";
 import { timeAgo } from "@/lib/format";
 
-/// Animes da Biblioteca (temporadas juntas num card só, igual a Biblioteca),
-/// do atualizado mais recente pro mais antigo. No hover: continuar de onde
-/// parou ou abrir a página do anime.
 export function MyListRow() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -29,7 +26,6 @@ export function MyListRow() {
 
   const openAnime = (g: WatchGroup) => navigate(`/library/${g.representative.id}`);
 
-  // Nada baixado ainda → abre a página do anime.
   async function continueGroup(g: WatchGroup) {
     if (playingKey) return;
     setPlayingKey(g.key);

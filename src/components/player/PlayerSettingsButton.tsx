@@ -20,7 +20,6 @@ import {
   type SubtitleStyle,
 } from "@/lib/subtitleStyle";
 
-/// Salva depois que o usuário para de mexer (slider dispara muitas mudanças).
 function useDebouncedSave(delay = 500) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   return (values: Record<string, string>) => {
@@ -29,9 +28,6 @@ function useDebouncedSave(delay = 500) {
   };
 }
 
-/// Engrenagem na barra do player: luz ambiente e aparência da legenda —
-/// tudo muda na hora. O estilo da legenda é do pai (a legenda é desenhada
-/// na mesma janela, ver SubtitleLayer).
 export function PlayerSettingsButton({
   open,
   setOpen,

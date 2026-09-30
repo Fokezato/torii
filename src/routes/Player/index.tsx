@@ -13,28 +13,19 @@ import { getSettings } from "@/lib/tauri";
 import { AmbientLight } from "@/components/player/AmbientLight";
 import { ambientFromSettings, onAmbientChanged, type AmbientSettings } from "@/lib/ambient";
 
-// Progresso menor que isso = recomeça do início (não vale "continuar" de 3s).
 const MIN_RESUME_MS = 5_000;
 
-/// Player de verdade: janela inteira (fora do AppShell, sem barra lateral),
-/// vídeo nativo do libvlc por baixo e os controles na janela de overlay por
-/// cima (ver `routes/PlayerOverlay`). Abre o episódio `:episode` do anime
-/// `:watchId`, continuando de onde parou se não tinha terminado.
 export default function Player() {
   const { t } = useTranslation();
   const { watchId, episode } = useParams<{ watchId: string; episode: string }>();
   const navigate = useNavigate();
   const slotRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
-  // Buscando fonte / conectando nos peers antes de abrir o stream.
   const [preparing, setPreparing] = useState(false);
-  // Proporção do vídeo — com luz ambiente, o vídeo fica só do tamanho da
-  // imagem e o espaço em volta recebe o brilho (ver AmbientLight).
   const videoAspectRef = useRef<number | null>(null);
   const [ambient, setAmbient] = useState<AmbientSettings | null>(null);
   usePlayerHost(slotRef, setError, videoAspectRef);
 
-  // Config inicial + ajustes feitos no painel do player (outra janela).
   useEffect(() => {
     getSettings()
       .then((s) => setAmbient(ambientFromSettings(s)))
@@ -53,8 +44,6 @@ export default function Player() {
       const [watches, episodes] = await Promise.all([listWatches(), listWatchEpisodes(id)]);
       const watch = watches.find((w) => w.id === id);
       const ep = episodes.find((e) => episodeNumberOf(e) === number);
-      // Baixado: o arquivo. Baixando, ou anime em modo Streaming: stream
-      // local (começa o download na hora se preciso).
       let source: string | null = null;
       if (watch && ep && isPlayable(ep)) {
         source = ep.item_path;
@@ -84,8 +73,6 @@ export default function Player() {
     };
   }, [watchId, episode]);
 
-  // Janela fechada pra bandeja com o player aberto: o Rust já parou o
-  // player; volta pra Biblioteca pra não reabrir num player parado.
   useEffect(() => {
     const unlisten = listen("app:window-hidden", () => navigate("/library", { replace: true }));
     return () => {
@@ -93,7 +80,6 @@ export default function Player() {
     };
   }, [navigate]);
 
-  // Saiu do player = para de tocar (senão o áudio seguia com a página fechada).
   useEffect(() => {
     return () => {
       playerStop().catch(() => {});

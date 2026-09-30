@@ -1,9 +1,3 @@
-//! "Reduzir resolução" (beta): recodifica o vídeo do episódio baixado pra
-//! 720p. Diferente de escolher release de resolução menor — nem todo anime
-//! tem. Medido ao vivo (Mushoku Tensei S3, 1080p WEB): vídeo ~10x menor,
-//! ~3min/episódio com NVENC, ~7min em CPU (SVT-AV1), sem bloco visível.
-//! Quem chama: `postprocess`.
-
 use crate::ffmpeg;
 use crate::media_file::{self, Outcome, ProcessError};
 use std::path::Path;
@@ -14,7 +8,6 @@ pub enum Encoder {
     Nvenc,
     Qsv,
     Amf,
-    /// CPU — mais lento, funciona em qualquer PC.
     SvtAv1,
 }
 
@@ -39,7 +32,6 @@ impl Encoder {
         }
     }
 
-    /// Qualidade calibrada pra anime em 720p (conferido quadro a quadro).
     fn args(self) -> &'static [&'static str] {
         match self {
             Encoder::Nvenc => &["-c:v:0", "hevc_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "27", "-b:v", "0"],
@@ -59,9 +51,6 @@ impl Encoder {
 
 static DETECTED: Mutex<Option<Encoder>> = Mutex::new(None);
 
-/// 1º codificador que REALMENTE funciona nesse PC — estar na lista do
-/// ffmpeg não basta (ex. hevc_nvenc listado mas driver velho demais, visto
-/// ao vivo). Testa com 0,2s de vídeo sintético; resultado fica em cache.
 pub fn detect_encoder(ffmpeg_path: &Path) -> Encoder {
     if let Some(found) = *DETECTED.lock().unwrap() {
         return found;
@@ -80,8 +69,6 @@ pub fn detect_encoder(ffmpeg_path: &Path) -> Encoder {
     found
 }
 
-/// Largura máxima pra cada opção (pela LARGURA, não altura: release com
-/// corte cinema tipo 1920x800 continua sendo "1080p").
 pub fn max_width_for(resolution: &str) -> Option<u32> {
     match resolution {
         "720p" => Some(1280),
@@ -109,9 +96,6 @@ pub fn downscale(
 
     let mut cmd = ffmpeg::command(&paths.ffmpeg);
     cmd.args(["-nostdin", "-v", "error", "-y", "-i"]).arg(file);
-    // Tudo copiado (áudio, legendas, anexos) — só o vídeo principal é
-    // recodificado; filtro só nele (-filter:v:0), senão o ffmpeg recusa
-    // capa embutida sendo copiada.
     cmd.args(["-map", "0", "-c", "copy"]);
     cmd.args(encoder.args());
     cmd.arg("-filter:v:0").arg(format!("scale={max_width}:-2:flags=lanczos,format={}", encoder.pixel_format()));

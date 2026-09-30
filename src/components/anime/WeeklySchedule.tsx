@@ -5,11 +5,8 @@ import { listWatches } from "@/lib/watches";
 import { getSchedule } from "@/lib/anilist";
 import { currentLocale } from "@/i18n";
 
-/// Nomes curtos dos dias (Dom..Sáb / Sun..Sat) no idioma atual, começando
-/// no domingo (mesma ordem de `Date.getDay()`).
 function weekdayNames(): string[] {
   const format = new Intl.DateTimeFormat(currentLocale(), { weekday: "short" });
-  // 2023-01-01 foi um domingo.
   return Array.from({ length: 7 }, (_, i) => format.format(new Date(2023, 0, 1 + i)).replace(".", ""));
 }
 
@@ -24,9 +21,6 @@ export function WeeklySchedule() {
   const { t } = useTranslation();
   const { data: watches } = useQuery({ queryKey: ["watches"], queryFn: listWatches });
 
-  // Todo anime da Biblioteca que ainda está no ar — independe de "checar
-  // novos episódios" (desligado ao limitar os episódios, por exemplo), já
-  // que o calendário só informa quando sai o próximo.
   const ids = useMemo(
     () => [
       ...new Set(

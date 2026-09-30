@@ -12,8 +12,6 @@ const OPTIONS: { mode: RemoveMode; icon: typeof Trash2 }[] = [
   { mode: "files_only", icon: FolderX },
 ];
 
-/// "Remover" da página do anime: tirar da Biblioteca apagando ou mantendo os
-/// arquivos, ou apagar só os arquivos e manter na Biblioteca.
 export function RemoveWatchDialog({
   watch,
   onOpenChange,
@@ -21,7 +19,6 @@ export function RemoveWatchDialog({
 }: {
   watch: Watch | null;
   onOpenChange: (open: boolean) => void;
-  /** Depois de remover — `mode` diz se o anime saiu da Biblioteca. */
   onDone: (mode: RemoveMode) => void;
 }) {
   const { t } = useTranslation();

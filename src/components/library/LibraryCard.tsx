@@ -26,15 +26,11 @@ export function LibraryCard({
   seasonCount = 1,
 }: {
   watch: Watch;
-  /** "Continuar" (hover): abre o player continuando de onde parou. */
   onPlay: () => void;
-  /** "Ver anime" (hover): abre a página do anime. */
   onOpenDetails: () => void;
   playLoading?: boolean;
   width?: number;
-  /** Título de exibição, se diferente do `watch.title` (ex. nome base sem "Season N" quando agrupado). */
   title?: string;
-  /** Quantas temporadas esse card representa — mostra um indicador quando > 1. */
   seasonCount?: number;
 }) {
   const { t } = useTranslation();

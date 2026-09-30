@@ -10,14 +10,6 @@ export interface NotifyPayload {
   sound?: boolean;
 }
 
-/**
- * Notificação com visual de toast do Windows, mas não é notificação nativa
- * do Windows — é uma janela Tauri própria (sem borda, sempre no topo, some
- * da taskbar), porque o toast nativo (tauri-plugin-notification/WinRT) exige
- * AUMID registrado e continuou sendo descartado silenciosamente mesmo no
- * app instalado de verdade nessa máquina. Emite pro evento que a janela
- * "notification-window" escuta — ver src/routes/NotificationWindow.
- */
 export function notify(
   title: string,
   body: string,
@@ -28,10 +20,6 @@ export function notify(
   void emit("notify:show", { title, body, variant, image, sound } satisfies NotifyPayload);
 }
 
-/**
- * Som sintetizado (dois tons rápidos), sem depender de arquivo de áudio
- * embutido. Chamado pela janela de notificação quando o payload pede som.
- */
 export function playNotificationSound(): void {
   try {
     const AudioCtx = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
@@ -56,6 +44,5 @@ export function playNotificationSound(): void {
     playTone(1318.5, 0.09, 0.18);
     setTimeout(() => ctx.close(), 500);
   } catch {
-    // Web Audio indisponível — silencioso, não impede o toast de aparecer.
   }
 }

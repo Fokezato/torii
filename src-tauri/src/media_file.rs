@@ -1,7 +1,3 @@
-//! Base comum do pós-processamento de episódio baixado (ver `postprocess`):
-//! ler as faixas do arquivo (ffprobe) e trocar o original por uma versão
-//! nova com segurança.
-
 use crate::ffmpeg;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -34,7 +30,6 @@ impl Probe {
         self.format.as_ref()?.duration.as_deref()?.parse().ok()
     }
 
-    /// Vídeo principal — ignora capa/miniatura embutida (attached_pic).
     pub fn main_video(&self) -> Option<&ProbeStream> {
         self.streams
             .iter()
@@ -60,30 +55,20 @@ pub fn probe(ffprobe: &Path, file: &Path) -> Result<Probe, String> {
     serde_json::from_slice(&out.stdout).map_err(|e| tr!("saída do ffprobe inválida: {e}", "invalid ffprobe output: {e}"))
 }
 
-/// Resultado de uma operação num arquivo.
 pub enum Outcome {
-    /// Nada a fazer nesse arquivo.
     Nothing,
-    /// Arquivo trocado; `saved` bytes a menos.
     Replaced { saved: u64 },
 }
 
-/// `Retry`: passageiro (arquivo em uso) — tenta de novo no próximo ciclo.
-/// `Permanent`: esse arquivo não dá — marca como processado e segue.
 pub enum ProcessError {
     Retry,
     Permanent(String),
 }
 
-/// Caminho temporário ao lado do original ("Ep.mkv" → "Ep.torii-tmp.mkv").
 pub fn temp_path(file: &Path) -> PathBuf {
     file.with_extension("torii-tmp.mkv")
 }
 
-/// Roda o ffmpeg já montado (saída = `temp_path(file)`), confere o
-/// resultado e troca pelo original: duração tem que bater (±2s). Original
-/// vira `.torii-old` antes, e só é apagado depois do novo assumir o nome —
-/// em nenhum momento fica sem arquivo válido.
 pub fn run_and_replace(
     ffprobe: &Path,
     mut cmd: std::process::Command,
@@ -111,7 +96,6 @@ pub fn run_and_replace(
     let before = std::fs::metadata(file).map(|m| m.len()).unwrap_or(0);
     let after = std::fs::metadata(&tmp).map(|m| m.len()).unwrap_or(0);
 
-    // Falha no rename é quase sempre arquivo em uso (aberto em outro player).
     let old = file.with_extension("torii-old.mkv");
     if std::fs::rename(file, &old).is_err() {
         let _ = std::fs::remove_file(&tmp);

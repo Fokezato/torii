@@ -2,14 +2,8 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 import { playerAmbientFrame } from "@/lib/player";
 import type { AmbientSettings } from "@/lib/ambient";
 
-/// Intervalo entre leituras das cores (~16 por segundo). A leitura é da tela
-/// (não mexe no vídeo) e leva poucos ms.
 const FRAME_INTERVAL_MS = 60;
 
-/// Luz ambiente estilo YouTube Ambilight: as cores do vídeo "vazam" em volta
-/// dele, borradas. O vídeo nativo fica só do tamanho da imagem (ver
-/// `usePlayerHost` + `aspectRef`); o espaço em volta é desenhado aqui.
-/// Atualiza `aspectRef` com a proporção real do vídeo tocando.
 export function AmbientLight({
   slotRef,
   aspectRef,
@@ -22,7 +16,6 @@ export function AmbientLight({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [slot, setSlot] = useState({ width: 0, height: 0 });
   const [aspect, setAspect] = useState<number | null>(null);
-  // Lido dentro do loop sem reiniciá-lo a cada ajuste do painel.
   const blendRef = useRef(1);
   blendRef.current = 1 - (settings.smoothness / 100) * 0.9;
 
@@ -36,8 +29,6 @@ export function AmbientLight({
 
   useEffect(() => {
     let stopped = false;
-    // Amostra nova vai primeiro pra cá e é misturada no canvas visível com
-    // `globalAlpha` (putImageData ignora transparência).
     const scratch = document.createElement("canvas");
     (async () => {
       while (!stopped) {
@@ -80,7 +71,6 @@ export function AmbientLight({
     };
   }, [aspectRef]);
 
-  // Mesmo encaixe da HWND do vídeo (ver usePlayerHost), em px de CSS.
   const spread = settings.size / 100;
   let box = { left: 0, top: 0, width: 0, height: 0 };
   if (aspect && slot.width > 0 && slot.height > 0) {
@@ -105,7 +95,6 @@ export function AmbientLight({
           filter: "blur(64px) saturate(1.35) brightness(0.95)",
         }}
       />
-      {/* Escurece rumo às bordas da tela, como a vinheta do Ambilight. */}
       <div
         className="absolute inset-0"
         style={{ background: "radial-gradient(ellipse at center, transparent 45%, rgba(0,0,0,0.75) 100%)" }}

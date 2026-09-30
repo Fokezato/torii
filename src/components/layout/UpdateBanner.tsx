@@ -4,12 +4,8 @@ import { ArrowUpCircle, X } from "lucide-react";
 import { getSettings } from "@/lib/tauri";
 import { useUpdateStore } from "@/stores/update";
 
-// Espera o app assentar antes de ir na rede.
 const STARTUP_CHECK_DELAY_MS = 8_000;
 
-/// Cartão no canto quando tem versão nova do Torii (ver `stores/update`).
-/// Checa sozinho ao abrir, se "Verificar atualizações automaticamente"
-/// estiver ligado em Config > Sobre.
 export function UpdateBanner() {
   const { t } = useTranslation();
   const { phase, update, progress, dismissed, checkNow, install, dismiss } = useUpdateStore();

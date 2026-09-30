@@ -2,16 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import type { SubtitleCue } from "@/lib/player";
 import { SUBTITLE_FONT_FAMILY, type SubtitleStyle } from "@/lib/subtitleStyle";
 
-/// Espessura do traço do contorno por nível (0 nenhum … 3 grosso), em em —
-/// acompanha o tamanho da fonte. Metade fica sob o preenchimento (ver
-/// `paint-order`), então o contorno visível é metade disso.
 const OUTLINE_EM = [0, 0.1, 0.16, 0.24];
-/// Quanto a legenda sobe quando a barra de controles aparece.
 const CONTROLS_LIFT_PX = 96;
 
-/// Contorno de verdade (traço), desenhado ATRÁS do preenchimento — antes era
-/// um anel de 8 sombras deslocadas, que no contorno grosso deixava "degraus"
-/// entre as direções (parecia a letra cortada).
 function outlineStyle(level: number): React.CSSProperties {
   const w = OUTLINE_EM[level] ?? 0;
   return {
@@ -21,9 +14,6 @@ function outlineStyle(level: number): React.CSSProperties {
   };
 }
 
-/// Legenda desenhada pelo Torii por cima do vídeo (modo personalizado).
-/// O player é consultado a cada ~400ms; entre uma consulta e outra o tempo
-/// é estimado pelo relógio, pra fala não entrar atrasada.
 export function SubtitleLayer({
   cues,
   positionMs,
@@ -32,15 +22,12 @@ export function SubtitleLayer({
   controlsVisible,
 }: {
   cues: SubtitleCue[];
-  /** Posição da última consulta ao player. */
   positionMs: number;
   playing: boolean;
   style: SubtitleStyle;
   controlsVisible: boolean;
 }) {
   const clockRef = useRef({ pos: positionMs, at: performance.now(), playing });
-  // Reancora o relógio só quando chega posição nova do player — não a cada
-  // renderização (a própria legenda renderiza várias vezes por segundo).
   useEffect(() => {
     clockRef.current = { pos: positionMs, at: performance.now(), playing };
   }, [positionMs, playing]);
@@ -51,7 +38,6 @@ export function SubtitleLayer({
     const tick = () => {
       const c = clockRef.current;
       const t = c.playing ? c.pos + (performance.now() - c.at) : c.pos;
-      // Arredonda pra não renderizar a cada quadro à toa.
       setNow((prev) => (Math.abs(prev - t) >= 40 ? t : prev));
       frame = requestAnimationFrame(tick);
     };

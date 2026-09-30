@@ -1,16 +1,4 @@
-// Build de release assinado + latest.json do atualizador automático.
-//
-//   npm run release:build -- v0.4.0
-//
-// A chave privada de atualização NUNCA fica no repositório: é lida de
-// TORII_UPDATER_KEY (caminho do arquivo) ou de ~/.tauri/torii-updater.key.
-// Sem ela, quem já tem o Torii instalado não aceita a atualização.
-//
-// Saída em src-tauri/target/release/bundle/nsis/: o instalador, o .sig e o
-// latest.json — os dois primeiros e o latest.json vão como assets da release
-// no GitHub (release normal, não pré-lançamento: o link
-// releases/latest/download/latest.json ignora pré-lançamentos).
-
+// Local signed Windows build + latest.json. Usage: npm run release:build -- vX.Y.Z
 import { execSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";

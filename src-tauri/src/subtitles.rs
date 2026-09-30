@@ -1,10 +1,3 @@
-//! Legenda personalizada: a faixa escolhida é extraída do arquivo com o
-//! ffmpeg (em ASS, que também cobre SRT) e desenhada pela interface do
-//! Torii por cima do vídeo — o libVLC não deixa trocar o estilo de legenda
-//! ASS (usa o do arquivo). Aqui só o diálogo é aproveitado; letreiros
-//! (placas, títulos posicionados, karaokê) ficam marcados como `sign` pra
-//! interface decidir (hoje: esconde).
-
 use crate::ffmpeg::{self, FfmpegPaths};
 use std::collections::HashMap;
 use std::path::Path;
@@ -15,19 +8,14 @@ pub struct Cue {
     pub start_ms: i64,
     pub end_ms: i64,
     pub text: String,
-    /// Letreiro/placa/karaokê (posicionado ou com estilo de sign).
     pub sign: bool,
-    /// Itálico (estilo "italics" ou `\i1`).
     pub italic: bool,
-    /// Fala no topo da tela (estilo "top" ou `\an7/8/9`).
     pub top: bool,
 }
 
 type Cache = Mutex<HashMap<(String, u32), Arc<Vec<Cue>>>>;
 static CACHE: OnceLock<Cache> = OnceLock::new();
 
-/// Falas da `ordinal`-ésima faixa de legenda do arquivo (0 = primeira),
-/// com cache por arquivo+faixa.
 pub fn cues(paths: &FfmpegPaths, file: &Path, ordinal: u32) -> Result<Arc<Vec<Cue>>, String> {
     let key = (file.to_string_lossy().to_string(), ordinal);
     let cache = CACHE.get_or_init(Default::default);
@@ -41,13 +29,10 @@ pub fn cues(paths: &FfmpegPaths, file: &Path, ordinal: u32) -> Result<Arc<Vec<Cu
         .output()
         .map_err(|e| e.to_string())?;
     if !out.status.success() {
-        // Legenda de imagem (PGS/VobSub) não vira texto — quem chama volta
-        // pra legenda do VLC.
         return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
     }
     let parsed = Arc::new(parse_ass(&String::from_utf8_lossy(&out.stdout)));
     let mut guard = cache.lock().unwrap();
-    // Cache pequeno: poucos episódios abertos por sessão.
     if guard.len() > 8 {
         guard.clear();
     }
@@ -55,7 +40,6 @@ pub fn cues(paths: &FfmpegPaths, file: &Path, ordinal: u32) -> Result<Arc<Vec<Cu
     Ok(parsed)
 }
 
-/// "H:MM:SS.cc" → ms.
 fn parse_time(t: &str) -> Option<i64> {
     let mut parts = t.trim().split(':');
     let h: i64 = parts.next()?.parse().ok()?;
@@ -64,7 +48,6 @@ fn parse_time(t: &str) -> Option<i64> {
     Some(h * 3_600_000 + m * 60_000 + (s * 1000.0).round() as i64)
 }
 
-/// Tira as tags `{\...}` e converte as quebras do ASS.
 fn clean_text(raw: &str) -> String {
     let mut out = String::with_capacity(raw.len());
     let mut depth = 0u32;
@@ -135,7 +118,6 @@ pub fn parse_ass(ass: &str) -> Vec<Cue> {
         cues.push(Cue { start_ms, end_ms, text, sign, italic, top });
     }
     cues.sort_by_key(|c| (c.start_ms, c.end_ms));
-    // Mesma fala repetida em várias camadas (efeito de borda/sombra no ASS).
     cues.dedup_by(|a, b| a.start_ms == b.start_ms && a.end_ms == b.end_ms && a.text == b.text);
     cues
 }

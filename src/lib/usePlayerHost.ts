@@ -4,17 +4,9 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { emit, listen } from "@tauri-apps/api/event";
 import { playerSetVideoArea } from "@/lib/player";
 
-/// Liga uma página ao player nativo: posiciona a HWND do vídeo (e a janela
-/// de controles por cima) em cima do elemento `slotRef`, e trata os eventos
-/// que a overlay emite ("voltar", "tela cheia"). Ao sair da página, some
-/// com o vídeo/overlay — a visibilidade é derivada da área no Rust (área
-/// fora da tela = oculto), ver `player_set_video_area`.
 export function usePlayerHost(
   slotRef: RefObject<HTMLDivElement | null>,
   onError?: (message: string) => void,
-  /** Proporção largura/altura do vídeo (luz ambiente ligada): a HWND do
-   * vídeo fica só do tamanho da imagem, centralizada, e o espaço em volta
-   * sobra pro brilho. `null` = vídeo ocupa a área toda. */
   videoAspectRef?: RefObject<number | null>,
 ) {
   const navigate = useNavigate();
@@ -26,8 +18,6 @@ export function usePlayerHost(
     };
   }, [navigate]);
 
-  // Atalhos de teclado com o foco nessa janela: repassa pra overlay, que
-  // tem o estado do player e trata tudo num lugar só (ver PlayerOverlay).
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.ctrlKey || e.altKey || e.metaKey) return;
@@ -54,7 +44,6 @@ export function usePlayerHost(
     return () => {
       unlisten.then((fn) => fn());
       unlistenExit.then((fn) => fn());
-      // Saiu do player em tela cheia — volta a janela ao normal.
       getCurrentWindow()
         .isFullscreen()
         .then((full) => (full ? getCurrentWindow().setFullscreen(false) : undefined))
@@ -68,10 +57,6 @@ export function usePlayerHost(
     if (!el) return;
     let cancelled = false;
 
-    // Lê a posição da JANELA primeiro (lado lento, round-trip IPC) e só
-    // DEPOIS o rect do elemento (síncrono) — minimiza a janela de tempo
-    // entre as 2 leituras (drift durante resize/move contínuo "vazava" a
-    // overlay pra fora da janela — bug real reportado).
     const reportBounds = async () => {
       const winPos = await getCurrentWindow().innerPosition();
       if (cancelled) return;
@@ -95,13 +80,8 @@ export function usePlayerHost(
     const observer = new ResizeObserver(reportBounds);
     observer.observe(el);
     window.addEventListener("resize", reportBounds);
-    // scroll não borbulha no DOM — captura no document pega scroll de
-    // qualquer ancestral rolável.
     document.addEventListener("scroll", reportBounds, true);
-    // Mover a janela não muda o viewport — sem isso a overlay ficava parada.
     const unlistenMoved = getCurrentWindow().onMoved(() => reportBounds());
-    // Rede de segurança: resincroniza a cada 1s (corrige drift residual e
-    // qualquer gatilho perdido, ex. maximizar).
     const resyncInterval = setInterval(reportBounds, 1000);
 
     return () => {
@@ -111,8 +91,6 @@ export function usePlayerHost(
       document.removeEventListener("scroll", reportBounds, true);
       unlistenMoved.then((fn) => fn());
       clearInterval(resyncInterval);
-      // Overlay vive a vida toda do app (ver spawn_player_overlay_window) —
-      // só manda ela e o vídeo pra fora da tela (= ocultos).
       playerSetVideoArea(-2000, -2000, 1, 1, -2000, -2000).catch(() => {});
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
