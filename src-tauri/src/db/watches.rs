@@ -7,9 +7,6 @@ pub struct Watch {
     pub title: String,
     pub query: String,
     pub anilist_id: Option<i64>,
-    /// ID no MyAnimeList — resolvido sob demanda (não no create) via campo
-    /// `idMal` da AniList, na 1ª vez que o player precisa buscar skip
-    /// segments (ver `sources::aniskip`). `None` até então.
     pub mal_id: Option<i64>,
     pub cover_url: Option<String>,
     pub quality: String,
@@ -27,20 +24,13 @@ pub struct Watch {
     pub episode_end: Option<i64>,
     pub created_at: String,
     pub updated_at: String,
-    /// "Reduzir resolução" desse anime: "720p" = ligado; NULL/"original" =
-    /// desligado. A opção global em Config, quando ligada, vale por cima.
     pub max_resolution: Option<String>,
-    /// "Remover áudios extras" desse anime — mesma regra da global.
     pub strip_audio: bool,
-    /// Anime (1ª temporada da franquia na AniList) a que essa temporada
-    /// pertence — chave de agrupamento na Biblioteca. NULL = ainda não
-    /// resolvido (sem anilist_id, ou AniList fora do ar).
     pub series_anilist_id: Option<i64>,
     pub series_title: Option<String>,
-    /// Modo "Streaming": o poller só acha a fonte (episódio 'ready'), o
-    /// download começa ao abrir no player e o arquivo some depois de
-    /// assistido. Ver `engine::start_stream`.
     pub streaming: bool,
+    /// `None` = follow the global setting.
+    pub delete_after_watched: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -64,8 +54,6 @@ pub struct NewWatch {
     pub max_resolution: Option<String>,
     pub strip_audio: Option<bool>,
     pub streaming: Option<bool>,
-    /// Preenchidos pelo backend (ver `commands::watches::create_watch`),
-    /// não pelo front.
     #[serde(skip)]
     pub series_anilist_id: Option<i64>,
     #[serde(skip)]
@@ -92,19 +80,10 @@ pub async fn get(pool: &SqlitePool, id: i64) -> Result<Watch, sqlx::Error> {
 pub async fn create(pool: &SqlitePool, library_root: &str, w: NewWatch) -> Result<Watch, sqlx::Error> {
     let now = chrono::Utc::now().to_rfc3339();
     let folder = w.folder.unwrap_or_else(|| {
-        // Pasta = nome do ANIME, não da temporada: o Jellyfin só agrupa como
-        // a mesma série se todas as temporadas morarem na mesma pasta pai.
-        // Nome do anime vem da 1ª temporada na AniList quando resolvido
-        // (cobre temporada sem "Season N" no título); senão, tira o
-        // "Season N" do título.
         let base_title = match &w.series_title {
             Some(series) => series.clone(),
             None => crate::sources::nyaa::split_season(&w.title).0,
         };
-        // `Path::join` usa o separador certo do SO — um `format!("{}/{}", ...)`
-        // aqui misturava "\" (do library_root do Windows) com "/" (literal),
-        // e esse path quebrado ia parar em `episodes.save_path`, fazendo o
-        // botão "Abrir pasta" falhar silenciosamente (bug real reportado).
         std::path::Path::new(library_root)
             .join(sanitize_folder_name(&base_title))
             .to_string_lossy()
@@ -218,6 +197,8 @@ pub struct WatchPreferences {
     pub strip_audio: bool,
     #[serde(default)]
     pub streaming: bool,
+    #[serde(default)]
+    pub delete_after_watched: Option<bool>,
 }
 
 pub async fn set_preferences(
@@ -228,7 +209,7 @@ pub async fn set_preferences(
     sqlx::query(
         "UPDATE watches SET quality = ?, audio_lang = ?, sub_lang = ?, delete_after_days = ?, \
          notify_on_available = ?, episode_start = ?, episode_end = ?, max_resolution = ?, \
-         strip_audio = ?, streaming = ?, updated_at = ? WHERE id = ?",
+         strip_audio = ?, streaming = ?, delete_after_watched = ?, updated_at = ? WHERE id = ?",
     )
     .bind(&prefs.quality)
     .bind(&prefs.audio_lang)
@@ -240,6 +221,7 @@ pub async fn set_preferences(
     .bind(&prefs.max_resolution)
     .bind(prefs.strip_audio)
     .bind(prefs.streaming)
+    .bind(prefs.delete_after_watched)
     .bind(chrono::Utc::now().to_rfc3339())
     .bind(id)
     .execute(pool)

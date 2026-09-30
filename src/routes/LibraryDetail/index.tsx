@@ -9,6 +9,7 @@ import {
   ExternalLink,
   ListVideo,
   MoreVertical,
+  Package,
   Play,
   Plus,
   RefreshCw,
@@ -17,6 +18,16 @@ import {
   Trash2,
   Users,
 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -27,10 +38,12 @@ import { getAnimeById, getAnimeSeasons, seasonTabLabel, type AnimeSummary } from
 import { WatchFormModal } from "@/components/anime/WatchFormModal";
 import { findContinueEpisode, playEpisode } from "@/lib/continueWatching";
 import {
+  deleteEpisode,
   downloadMissingEpisodes,
   forceCheckEpisode,
   listEpisodeSources,
   listWatchEpisodes,
+  packKey,
   switchEpisodeSource,
   type Episode,
 } from "@/lib/episodes";
@@ -73,8 +86,6 @@ export default function LibraryDetail() {
   });
   const entryWatch = watches?.find((w) => w.id === Number(id));
 
-  // Todas as temporadas do anime na AniList, em ordem de lançamento — ordena
-  // as abas e alimenta o "Outra temporada" (as que ainda não estão aqui).
   const franchiseRoot = entryWatch?.series_anilist_id ?? entryWatch?.anilist_id ?? null;
   const { data: franchise = [] } = useQuery({
     queryKey: ["anime-seasons", franchiseRoot],
@@ -87,8 +98,6 @@ export default function LibraryDetail() {
     return i >= 0 ? i : 1000 + (parseSeasonFromTitle(w.title) ?? 0);
   };
 
-  // Temporadas do mesmo anime que já estão na Biblioteca viram abas dentro
-  // dessa página em vez de cards separados.
   const seasons: Watch[] = entryWatch
     ? (watches ?? [])
         .filter((w) => seriesKeyOf(w) === seriesKeyOf(entryWatch))
@@ -98,7 +107,6 @@ export default function LibraryDetail() {
   const [addSeason, setAddSeason] = useState<AnimeSummary | null>(null);
   const [addSeasonMenuOpen, setAddSeasonMenuOpen] = useState(false);
 
-  // Troca de anime (novo :id na URL) reseta pra season que foi clicada.
   useEffect(() => {
     setSelectedId(Number(id));
   }, [id]);
@@ -111,10 +119,6 @@ export default function LibraryDetail() {
     enabled: watch?.anilist_id != null,
   });
 
-  // Episódio "pending" cuja data de exibição a AniList já sabe (mas ainda
-  // não foi ao ar) mostra "Disponível a partir de DD/MM" em vez de
-  // "Procurando" — sem isso o placeholder parecia um torrent perdido, não
-  // um episódio que literalmente ainda não existe pra baixar.
   const upcomingByEpisode = new Map((anime?.upcoming_episodes ?? []).map((u) => [u.episode, u.airing_at]));
 
   const { data: episodeList = [] } = useQuery({
@@ -142,7 +146,6 @@ export default function LibraryDetail() {
   const downloadMissing = useMutation({
     mutationFn: () => downloadMissingEpisodes(watch!.id),
     onSuccess: () => {
-      // Buscas rodam em segundo plano — atualiza a lista quando começarem.
       setTimeout(() => queryClient.invalidateQueries({ queryKey: ["watch-episodes"] }), 4000);
     },
   });
@@ -176,9 +179,6 @@ export default function LibraryDetail() {
   const seriesTitle = seriesTitleOf(watch);
   const tabLabel = (w: Watch) =>
     seasonTabLabel(franchise.find((f) => f.anilist_id === w.anilist_id)?.title ?? w.title, seriesTitle);
-  // "Baixado" = pronto de verdade. Com os placeholders (ver create_placeholder
-  // no Rust) quase todo episódio tem linha o tempo todo, então "!== deleted"
-  // não serve mais de proxy pra "baixado" — só available conta.
   const downloadedCount = episodeList.filter((e) => e.status === "available").length;
   const baseTitle = seriesTitle;
   const latestAvailable = episodeList
@@ -251,7 +251,6 @@ export default function LibraryDetail() {
               <button
                 type="button"
                 onClick={async () => {
-                  // Continua de onde parou nessa temporada, no player do Torii.
                   const target = await findContinueEpisode([watch]).catch(() => null);
                   if (target) await playEpisode(target.watch, target.episode, navigate);
                 }}
@@ -261,7 +260,6 @@ export default function LibraryDetail() {
                 {t("detail.play")}
               </button>
             ) : (
-              // Nada baixado nessa temporada: busca e baixa tudo que falta.
               <button
                 type="button"
                 disabled={downloadingAny || downloadMissing.isPending}
@@ -407,6 +405,7 @@ export default function LibraryDetail() {
           </div>
         ) : (
           <div className="flex flex-col gap-2">
+            <PackBanners episodes={episodeList} />
             {episodeList
               .slice()
               .sort(
@@ -438,28 +437,63 @@ const EPISODE_STATUS_STYLE: Record<string, { bg: string; fg: string }> = {
   deleted: { bg: "transparent", fg: "#6C7180" },
 };
 
+function PackBanner({ episodes }: { episodes: Episode[] }) {
+  const { t } = useTranslation();
+  const first = episodes[0];
+  const { data: sources } = useQuery({
+    queryKey: ["episode-sources", first.id],
+    queryFn: () => listEpisodeSources(first.id),
+    staleTime: Infinity,
+  });
+  const title = sources?.find((s) => s.source_item_id === first.source_item_id)?.title ?? "";
+  const numbers = episodes.map((e) => e.episode_number).filter((n): n is number => n != null).sort((a, b) => a - b);
+  const range = numbers.length ? `${numbers[0]}–${numbers[numbers.length - 1]}` : "";
+  const ready = episodes.filter((e) => e.status === "available").length;
+  return (
+    <div className="flex items-center gap-3 rounded-[10px] border border-accent2/30 bg-accent2/[0.06] px-4 py-3">
+      <Package className="size-4 shrink-0 text-accent2" />
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="text-[12.5px] font-semibold">{t("detail.packBanner", { range })}</span>
+        <span className="truncate text-[11px] text-[#8A8F9C]" title={title}>
+          {title}
+        </span>
+      </div>
+      <span className="shrink-0 text-[11px] font-semibold text-accent2">
+        {t("detail.packReady", { ready, total: episodes.length })}
+      </span>
+    </div>
+  );
+}
+
+/// One banner per season pack in use by this season's episodes.
+function PackBanners({ episodes }: { episodes: Episode[] }) {
+  const groups = new Map<string, Episode[]>();
+  for (const e of episodes) {
+    if (e.status === "deleted") continue;
+    const key = packKey(e);
+    if (!key) continue;
+    groups.set(key, [...(groups.get(key) ?? []), e]);
+  }
+  return (
+    <>
+      {[...groups.entries()].map(([key, group]) => (
+        <PackBanner key={key} episodes={group} />
+      ))}
+    </>
+  );
+}
+
 function EpisodeItem({ episode, watch, airingAt }: { episode: Episode; watch: Watch; airingAt?: number }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  // Fora do intervalo escolhido ("Quais episódios baixar"): o motor não
-  // busca, mas o episódio continua na lista em vez de sumir.
   const n = episode.episode_number;
   const outOfRange =
     episode.status === "pending" &&
     n != null &&
     ((watch.episode_start != null && n < watch.episode_start) || (watch.episode_end != null && n > watch.episode_end));
 
-  // Episódio "pending" com data de exibição já anunciada pela AniList mas
-  // ainda não foi ao ar — mostrar "Procurando" seria enganoso (não tem
-  // torrent nenhum pra achar, o episódio nem existe ainda).
   const notYetAired = !outOfRange && episode.status === "pending" && airingAt != null;
 
-  // Sem "airingAt" mas ainda "pending" pode ser só episódio original (JP)
-  // já lançado que o poller genuinamente não achou, OU pode ser atraso de
-  // localização: com filtro de idioma configurado, dublagem/legenda costuma
-  // sair dias/semanas depois do episódio original. A AniList não expõe
-  // calendário de dublagem (só a data original), então não dá pra saber o
-  // dia exato — só deixar claro que é espera de idioma, não busca quebrada.
   const wantedLangs = [...(watch.audio_lang?.split(",") ?? []), ...(watch.sub_lang?.split(",") ?? [])]
     .filter(Boolean)
     .map(languageLabel);
@@ -482,8 +516,14 @@ function EpisodeItem({ episode, watch, airingAt }: { episode: Episode; watch: Wa
   return (
     <div className="flex items-center gap-3 rounded-[10px] border border-[#1E212A] bg-[#15171D] px-4 py-3">
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="truncate text-[12.5px] font-medium" title={episode.name ?? undefined}>
-          {parseEpisodeLabel(episode.name, episode.episode_number)}
+        <span className="flex min-w-0 items-center gap-2 text-[12.5px] font-medium" title={episode.name ?? undefined}>
+          <span className="truncate">{parseEpisodeLabel(episode.name, episode.episode_number)}</span>
+          {packKey(episode) && episode.status !== "deleted" && (
+            <span className="flex shrink-0 items-center gap-1 rounded-[4px] bg-accent2/15 px-1.5 py-px text-[9px] font-bold tracking-wide text-accent2 uppercase">
+              <Package className="size-2.5" />
+              {t("detail.packBadge")}
+            </span>
+          )}
         </span>
         {episode.status === "error" && episode.error_message && (
           <span className="truncate text-[11px] text-destructive">{episode.error_message}</span>
@@ -529,9 +569,6 @@ function EpisodeItem({ episode, watch, airingAt }: { episode: Episode; watch: Wa
   );
 }
 
-/// Botão "..." do episódio: "Fonte" (ver/trocar release) e "Forçar
-/// verificação" (busca esse episódio no Nyaa agora, sem esperar o próximo
-/// ciclo de poll — útil sobretudo pros placeholders "Procurando").
 function EpisodeActionsMenu({
   episode,
   watch,
@@ -539,13 +576,22 @@ function EpisodeActionsMenu({
 }: {
   episode: Episode;
   watch: Watch;
-  /** Fora do intervalo escolhido — "Forçar verificação" vira "Baixar agora". */
   outOfRange: boolean;
 }) {
   const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
   const [sourceOpen, setSourceOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const queryClient = useQueryClient();
+  const deletable = ["available", "downloading", "found", "ready", "error"].includes(episode.status);
+
+  const remove = useMutation({
+    mutationFn: () => deleteEpisode(episode.id),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["watch-episodes"] });
+      queryClient.invalidateQueries({ queryKey: ["recent-episodes"] });
+    },
+  });
 
   const forceCheck = useMutation({
     mutationFn: () => forceCheckEpisode(episode.id),
@@ -602,18 +648,43 @@ function EpisodeActionsMenu({
                 ? t("detail.downloadNow")
                 : t("detail.forceCheck")}
           </button>
+          {deletable && (
+            <button
+              type="button"
+              disabled={remove.isPending}
+              onClick={() => {
+                setMenuOpen(false);
+                setConfirmDelete(true);
+              }}
+              className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-[#E5484D] transition-colors hover:bg-[#E5484D]/10 disabled:opacity-40"
+            >
+              <Trash2 className="size-3.5" />
+              {t("detail.deleteEpisode")}
+            </button>
+          )}
         </PopoverContent>
       </Popover>
       <SourceDialog episode={episode} watch={watch} open={sourceOpen} onOpenChange={setSourceOpen} />
+      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t("detail.deleteEpisodeTitle", { episode: parseEpisodeLabel(episode.name, episode.episode_number) })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>{t("detail.deleteEpisodeText")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={() => remove.mutate()}>
+              {t("detail.deleteEpisodeConfirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
 
-/// Popup com detalhe de cada release que casou com esse episódio (ver
-/// `group_best_per_episode` no Rust) — nome cru do torrent, seed/leech,
-/// tamanho, link pro nyaa — e botão pra trocar qual tá ativa. Fontes só
-/// existem em `episode_sources` a partir dessa feature; episódio antigo
-/// (baixado antes dela existir) mostra a lista vazia, sem quebrar nada.
 function SourceDialog({
   episode,
   watch,
@@ -653,11 +724,11 @@ function SourceDialog({
       <DialogContent
         showCloseButton={false}
         style={{ maxWidth: "480px", width: "92vw" }}
-        className="gap-0 overflow-hidden rounded-[20px] bg-[#15171D] p-0 ring-0"
+        className="grid-cols-[minmax(0,1fr)] gap-0 overflow-hidden rounded-[20px] bg-[#15171D] p-0 ring-0"
       >
-        <div className="flex flex-col gap-2 border-b border-[#1E212A] px-[22px] py-[18px]">
-          <h2 className="min-w-0 truncate text-base font-bold">
-            {t("detail.source")} · {parseEpisodeLabel(episode.name)}
+        <div className="flex min-w-0 flex-col gap-2 border-b border-[#1E212A] px-[22px] py-[18px]">
+          <h2 className="line-clamp-2 text-base font-bold [overflow-wrap:anywhere]">
+            {t("detail.source")} · {parseEpisodeLabel(episode.name, episode.episode_number)}
           </h2>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-[#6C7180]">
             <span>
@@ -686,7 +757,7 @@ function SourceDialog({
                 }`}
               >
                 <div className="flex items-start justify-between gap-2">
-                  <p className="min-w-0 flex-1 text-[12px] leading-snug break-words">{s.title}</p>
+                  <p className="min-w-0 flex-1 text-[12px] leading-snug [overflow-wrap:anywhere]">{s.title}</p>
                   {!!s.is_active && (
                     <span className="flex shrink-0 items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-bold text-primary">
                       <Check className="size-3" />

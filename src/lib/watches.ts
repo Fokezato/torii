@@ -22,22 +22,15 @@ export interface Watch {
   episode_end: number | null;
   created_at: string;
   updated_at: string;
-  /** "Reduzir resolução" desse anime: "720p" = ligado; null/"original" = desligado.
-   * Ligado na Config vale pra todos por cima disso. */
   max_resolution: string | null;
-  /** "Remover áudios extras" desse anime — mesma regra. */
   strip_audio: boolean;
-  /** Anime (1ª temporada na AniList) dessa temporada — agrupa na Biblioteca.
-   * null = ainda não resolvido (cai no agrupamento por título). */
   series_anilist_id: number | null;
   series_title: string | null;
-  /** Modo Streaming: nada baixa sozinho; ao abrir no player o episódio
-   * baixa e toca na hora, e é apagado depois de assistido. */
   streaming: boolean;
+  /** null = follow the global setting. */
+  delete_after_watched: boolean | null;
 }
 
-/** Chave de agrupamento por anime: franquia da AniList quando resolvida,
- * senão o título sem "Season N". */
 export function seriesKeyOf(w: Watch): string {
   return w.series_anilist_id != null ? `anilist:${w.series_anilist_id}` : `title:${getSeriesGroupKey(w.title)}`;
 }
@@ -51,15 +44,9 @@ export interface WatchGroup {
   title: string;
   representative: Watch;
   seasons: Watch[];
-  /** Atualização mais recente entre as temporadas. */
   updated_at: string;
 }
 
-// Temporadas do mesmo anime viram UM card só na grade (título do anime,
-// sem "Season N") — a temporada vira aba lá dentro. Agrupa pela franquia na
-// AniList (pega temporada sem "Season N" no nome, ex. "Entertainment
-// District Arc"), ou pelo título quando ainda não resolvida.
-// Representante = temporada mais recente (maior anilist_id ≈ mais nova).
 export function groupBySeries(watches: Watch[]): WatchGroup[] {
   const map = new Map<string, Watch[]>();
   for (const w of watches) {
@@ -111,9 +98,6 @@ export async function createWatch(watch: NewWatch): Promise<Watch> {
   return invoke<Watch>("create_watch", { watch });
 }
 
-/** "everything": tira da Biblioteca e apaga os arquivos; "keep_files": tira
- * e mantém os arquivos; "files_only": apaga os arquivos e continua na
- * Biblioteca. Devolve quantos arquivos não deu pra apagar. */
 export type RemoveMode = "everything" | "keep_files" | "files_only";
 
 export async function removeWatch(id: number, mode: RemoveMode): Promise<number> {
@@ -143,6 +127,7 @@ export interface WatchPreferences {
   max_resolution: string | null;
   strip_audio: boolean;
   streaming: boolean;
+  delete_after_watched: boolean | null;
 }
 
 export async function setWatchPreferences(id: number, prefs: WatchPreferences): Promise<void> {

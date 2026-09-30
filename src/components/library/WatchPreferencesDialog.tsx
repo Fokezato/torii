@@ -13,6 +13,7 @@ import { getAvailableLanguages } from "@/lib/nyaa";
 import { getSettings } from "@/lib/tauri";
 import { ffmpegInstall } from "@/lib/tools";
 import { IrreversibleToggle } from "@/components/shared/IrreversibleToggle";
+import { DeletionRules, rulesFromSettings, type DeletionRulesValue } from "@/components/shared/DeletionRules";
 
 interface WatchPreferencesDialogProps {
   watch: Watch | null;
@@ -26,11 +27,11 @@ export function WatchPreferencesDialog({ watch, onOpenChange }: WatchPreferences
   const [streaming, setStreaming] = useState(false);
   const [audioLangs, setAudioLangs] = useState<string[]>([]);
   const [subLangs, setSubLangs] = useState<string[]>([]);
-  const [deleteAfterDays, setDeleteAfterDays] = useState("");
+  const [useGlobalDeletion, setUseGlobalDeletion] = useState(true);
+  const [deletion, setDeletion] = useState<DeletionRulesValue>({ days: null, afterWatched: false });
   const [notify, setNotify] = useState(true);
   const [stripAudio, setStripAudio] = useState(false);
   const [downscale, setDownscale] = useState(false);
-  // Ligado na Config = vale pra todos; aqui só aparece travado.
   const { data: settings } = useQuery({ queryKey: ["settings"], queryFn: getSettings, enabled: watch != null });
   const globalStrip = settings?.strip_unused_audio === "1";
   const globalDownscale = settings?.downscale_resolution === "720p";
@@ -50,7 +51,17 @@ export function WatchPreferencesDialog({ watch, onOpenChange }: WatchPreferences
       setQuality(watch.quality);
       setAudioLangs(watch.audio_lang ? watch.audio_lang.split(",") : []);
       setSubLangs(watch.sub_lang ? watch.sub_lang.split(",") : []);
-      setDeleteAfterDays(watch.delete_after_days != null ? String(watch.delete_after_days) : "");
+      const followsGlobal = watch.delete_after_days == null && watch.delete_after_watched == null;
+      const global = rulesFromSettings(settings);
+      setUseGlobalDeletion(followsGlobal);
+      setDeletion(
+        followsGlobal
+          ? global
+          : {
+              days: watch.delete_after_days != null ? (watch.delete_after_days > 0 ? watch.delete_after_days : null) : global.days,
+              afterWatched: watch.delete_after_watched ?? global.afterWatched,
+            },
+      );
       setNotify(watch.notify_on_available);
       setStreaming(watch.streaming);
       setStripAudio(watch.strip_audio);
@@ -58,7 +69,7 @@ export function WatchPreferencesDialog({ watch, onOpenChange }: WatchPreferences
       const max = watch.episodes ?? 24;
       setEpisodeRange([watch.episode_start ?? 1, watch.episode_end ?? max]);
     }
-  }, [watch]);
+  }, [watch, settings]);
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -66,9 +77,8 @@ export function WatchPreferencesDialog({ watch, onOpenChange }: WatchPreferences
         quality,
         audio_lang: audioLangs.length ? audioLangs.join(",") : null,
         sub_lang: subLangs.length ? subLangs.join(",") : null,
-        // "0" não é retenção válida — apagaria no primeiro ciclo de limpeza
-        // depois de ficar pronto. Trata igual a "nunca" em vez de aceitar.
-        delete_after_days: deleteAfterDays.trim() && Number(deleteAfterDays) > 0 ? Number(deleteAfterDays) : null,
+        delete_after_days: useGlobalDeletion ? null : (deletion.days ?? 0),
+        delete_after_watched: useGlobalDeletion ? null : deletion.afterWatched,
         notify_on_available: notify,
         episode_start: rangeIsFull ? null : episodeRange[0],
         episode_end: rangeIsFull ? null : episodeRange[1],
@@ -78,7 +88,6 @@ export function WatchPreferencesDialog({ watch, onOpenChange }: WatchPreferences
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["watches"] });
-      // Baixa o ffmpeg (se preciso) e já processa os episódios existentes.
       if (stripAudio || downscale) ffmpegInstall().catch(() => {});
       onOpenChange(false);
     },
@@ -139,18 +148,29 @@ export function WatchPreferencesDialog({ watch, onOpenChange }: WatchPreferences
 
               <div className="h-px bg-[#1E212A]" />
 
-              <div className="flex items-center justify-between gap-5">
-                <span className="text-[13px] font-semibold">{t("preferences.deleteAfterDays")}</span>
-                <input
-                  type="number"
-                  min={1}
-                  value={deleteAfterDays}
-                  onChange={(e) => setDeleteAfterDays(e.target.value)}
-                  placeholder={t("preferences.never")}
-                  title={t("preferences.deleteAfterDaysHint")}
-                  className="w-20 rounded-lg border border-[#262A35] bg-[#1B1E27] px-3 py-2 text-right text-xs text-foreground outline-none focus:border-primary"
+              <div className="flex flex-col gap-2.5">
+                <span className="text-[13px] font-semibold">{t("deletion.title")}</span>
+                <div className="flex items-center justify-between gap-5">
+                  <div className="flex flex-col gap-0.5">
+                    <span className="text-[12.5px]">{t("deletion.useGlobal")}</span>
+                    <span className="text-[11.5px] text-[#6C7180]">{t("deletion.useGlobalHint")}</span>
+                  </div>
+                  <Switch
+                    checked={useGlobalDeletion}
+                    onCheckedChange={(on) => {
+                      setUseGlobalDeletion(on);
+                      if (on) setDeletion(rulesFromSettings(settings));
+                    }}
+                  />
+                </div>
+                <DeletionRules
+                  value={useGlobalDeletion ? rulesFromSettings(settings) : deletion}
+                  onChange={setDeletion}
+                  disabled={useGlobalDeletion}
+                  jellyfinUnset={settings?.jellyfin_mode !== "1"}
                 />
               </div>
+
 
               <div className="flex items-center justify-between gap-5">
                 <span className="text-[13px] font-semibold">{t("preferences.notifyReady")}</span>

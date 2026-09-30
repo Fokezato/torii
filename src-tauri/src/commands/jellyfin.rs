@@ -9,6 +9,18 @@ pub struct JellyfinTestResult {
 }
 
 #[tauri::command]
+pub async fn jellyfin_users(state: State<'_, AppState>) -> Result<Vec<jellyfin::JellyfinUser>, AppError> {
+    let settings = db::settings::get_all(&state.db).await?;
+    let (Some(url), Some(key)) = (
+        settings.get("jellyfin_url").filter(|s| !s.is_empty()),
+        settings.get("jellyfin_api_key").filter(|s| !s.is_empty()),
+    ) else {
+        return Ok(Vec::new());
+    };
+    jellyfin::list_users(&state.http, url, key).await.map_err(AppError::Fetch)
+}
+
+#[tauri::command]
 pub async fn test_jellyfin_connection(state: State<'_, AppState>) -> Result<JellyfinTestResult, AppError> {
     let settings = db::settings::get_all(&state.db).await?;
     let url = settings

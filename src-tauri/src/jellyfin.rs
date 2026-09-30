@@ -14,9 +14,6 @@ pub struct ConnectionInfo {
     pub version: String,
 }
 
-/// Testa a conexão batendo em `/System/Info` — endpoint mais barato que
-/// exige um token válido, então também confirma a API key, não só que o
-/// servidor tá de pé.
 pub async fn test_connection(
     client: &reqwest::Client,
     base_url: &str,
@@ -41,8 +38,6 @@ pub async fn test_connection(
     })
 }
 
-/// Pede pro Jellyfin re-escanear uma pasta específica (não a biblioteca
-/// inteira) depois que um episódio termina de baixar.
 pub async fn refresh_path(
     client: &reqwest::Client,
     base_url: &str,
@@ -80,10 +75,6 @@ struct JellyfinItem {
     path: Option<String>,
 }
 
-/// Espera o Jellyfin terminar de escanear e acha o item que corresponde ao
-/// arquivo que acabou de baixar, comparando o path (case-insensitive, já
-/// que Windows não diferencia maiúscula/minúscula). Poll curto porque o
-/// refresh do Jellyfin não é instantâneo.
 pub async fn find_item_by_path(
     client: &reqwest::Client,
     base_url: &str,
@@ -141,4 +132,80 @@ pub async fn delete_item(
         return Err(format!("Jellyfin respondeu {} ao apagar item", resp.status()));
     }
     Ok(())
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct JellyfinUser {
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Deserialize)]
+struct RawUser {
+    #[serde(rename = "Id")]
+    id: String,
+    #[serde(rename = "Name")]
+    name: String,
+}
+
+pub async fn list_users(client: &reqwest::Client, base_url: &str, api_key: &str) -> Result<Vec<JellyfinUser>, String> {
+    let url = format!("{}/Users", base_url.trim_end_matches('/'));
+    let resp = client.get(&url).header("X-Emby-Token", api_key).send().await.map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("Jellyfin: {}", resp.status()));
+    }
+    let users: Vec<RawUser> = resp.json().await.map_err(|e| e.to_string())?;
+    Ok(users.into_iter().map(|u| JellyfinUser { id: u.id, name: u.name }).collect())
+}
+
+#[derive(Deserialize)]
+struct ItemsPage {
+    #[serde(rename = "Items", default)]
+    items: Vec<PlayedItem>,
+}
+
+#[derive(Deserialize)]
+struct PlayedItem {
+    #[serde(rename = "Id")]
+    id: String,
+    #[serde(rename = "UserData")]
+    user_data: Option<PlayedData>,
+}
+
+#[derive(Deserialize)]
+struct PlayedData {
+    #[serde(rename = "Played", default)]
+    played: bool,
+    #[serde(rename = "LastPlayedDate")]
+    last_played: Option<String>,
+}
+
+/// Items among `item_ids` that `user_id` has finished, with when (if Jellyfin knows).
+pub async fn played_items(
+    client: &reqwest::Client,
+    base_url: &str,
+    api_key: &str,
+    user_id: &str,
+    item_ids: &[String],
+) -> Result<Vec<(String, Option<String>)>, String> {
+    let mut played = Vec::new();
+    for chunk in item_ids.chunks(100) {
+        let url = format!(
+            "{}/Users/{}/Items?Ids={}&EnableUserData=true",
+            base_url.trim_end_matches('/'),
+            user_id,
+            chunk.join(",")
+        );
+        let resp = client.get(&url).header("X-Emby-Token", api_key).send().await.map_err(|e| e.to_string())?;
+        if !resp.status().is_success() {
+            return Err(format!("Jellyfin: {}", resp.status()));
+        }
+        let page: ItemsPage = resp.json().await.map_err(|e| e.to_string())?;
+        played.extend(
+            page.items
+                .into_iter()
+                .filter_map(|i| i.user_data.filter(|d| d.played).map(|d| (i.id, d.last_played))),
+        );
+    }
+    Ok(played)
 }

@@ -35,10 +35,6 @@ pub async fn resume_episode_download(state: State<'_, AppState>, episode_id: i64
     Ok(())
 }
 
-/// Cancela um download incompleto. Volta o episódio pra "pending" em vez de
-/// "deleted" — a linha é o placeholder permanente do episódio na Biblioteca
-/// (ver `create_placeholder`), então cancelar não deve fazê-lo sumir, só
-/// esquecer a tentativa e deixar procurável de novo no próximo poll.
 #[tauri::command]
 pub async fn cancel_episode_download(
     state: State<'_, AppState>,
@@ -50,11 +46,11 @@ pub async fn cancel_episode_download(
     Ok(())
 }
 
-/// Menu "..." > Forçar verificação na Biblioteca: busca só esse episódio no
-/// Nyaa agora, ignorando o ciclo de poll normal — útil quando o poller
-/// nunca chegou nele ainda, ou a última tentativa falhou e o usuário não
-/// quer esperar o próximo ciclo. Devolve `true` se achou e iniciou
-/// download, `false` se não achou candidato nenhum dessa vez.
+#[tauri::command]
+pub async fn delete_episode(state: State<'_, AppState>, episode_id: i64) -> Result<(), AppError> {
+    engine::delete_episode(&state, episode_id).await
+}
+
 #[tauri::command]
 pub async fn force_check_episode(
     app: AppHandle,
@@ -64,8 +60,6 @@ pub async fn force_check_episode(
     engine::force_download_episode(&app, &state, episode_id, true).await
 }
 
-/// URL pra assistir enquanto baixa (ver `stream_server`). Erro se o
-/// episódio não está baixando (sem torrent no motor).
 #[tauri::command]
 pub async fn episode_stream_url(app: AppHandle, state: State<'_, AppState>, episode_id: i64) -> Result<String, AppError> {
     let server = app
@@ -84,8 +78,6 @@ pub async fn episode_stream_url(app: AppHandle, state: State<'_, AppState>, epis
     Ok(server.url(episode_id, &extension))
 }
 
-/// Abre o episódio por stream: começa o download se precisar (anime em modo
-/// Streaming, ver `engine::start_stream`) e devolve a URL local.
 #[tauri::command]
 pub async fn episode_stream_start(
     app: AppHandle,
@@ -96,7 +88,6 @@ pub async fn episode_stream_start(
     episode_stream_url(app, state, episode_id).await
 }
 
-/// Metade do episódio (modo Streaming): já começa a baixar o próximo.
 #[tauri::command]
 pub async fn episode_prefetch_next(app: AppHandle, watch_id: i64, episode_number: i64) -> Result<(), AppError> {
     tauri::async_runtime::spawn(async move {
@@ -106,10 +97,6 @@ pub async fn episode_prefetch_next(app: AppHandle, watch_id: i64, episode_number
     Ok(())
 }
 
-/// "Baixar episódios" da página do anime (temporada sem nada baixado): busca
-/// e começa todos os episódios que faltam — dentro do intervalo escolhido,
-/// se houver. Roda em segundo plano (1 busca no Nyaa por episódio); devolve
-/// quantos entraram na fila.
 #[tauri::command]
 pub async fn download_missing_episodes(
     app: AppHandle,
@@ -153,8 +140,6 @@ pub async fn list_episode_sources(
     Ok(db::episode_sources::list(&state.db, episode_id).await?)
 }
 
-/// Menu "..." > Trocar fonte na Biblioteca: cancela o torrent/arquivo atual
-/// (se algum) e reinicia o download a partir da fonte alternativa escolhida.
 #[tauri::command]
 pub async fn switch_episode_source(
     app: AppHandle,

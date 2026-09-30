@@ -14,9 +14,6 @@ pub async fn list_watches(state: State<'_, AppState>) -> Result<Vec<Watch>, AppE
     Ok(db::watches::list(&state.db).await?)
 }
 
-/// Anime (1ª temporada da franquia na AniList) a que essa temporada
-/// pertence: (anilist_id da raiz, título do anime sem "Season N"). `None`
-/// se a AniList não responder a tempo — aí vale o agrupamento por título.
 pub async fn resolve_series(http: &reqwest::Client, anilist_id: i64) -> Option<(i64, String)> {
     let seasons = tokio::time::timeout(
         std::time::Duration::from_secs(10),
@@ -45,14 +42,6 @@ pub async fn create_watch(
     let library_root = settings.get("library_root").cloned().unwrap_or_default();
     let created = db::watches::create(&state.db, &library_root, watch).await?;
 
-    // Cria a linha de cada episódio da temporada já na Biblioteca (status
-    // "pending"), antes de qualquer busca no Nyaa — sem isso o episódio só
-    // aparece quando (e se) o poller acha um torrent, e problema de busca
-    // vira "episódio sumido" pro usuário. TODOS os episódios, não só o
-    // intervalo escolhido: fora do intervalo aparece "Não baixado" na
-    // Biblioteca (o poller já não busca fora dele) em vez de sumir. Sem
-    // contagem de episódio (anime ainda no ar sem total definido no
-    // AniList) continua descoberta incrementalmente.
     if let Some(total) = created.episodes.filter(|n| *n > 0) {
         for ep in 1..=total {
             if let Err(e) = db::episodes::create_placeholder(&state.db, created.id, &created.folder, ep).await {
@@ -69,22 +58,14 @@ pub async fn create_watch(
     Ok(created)
 }
 
-/// O que o "Remover" da página do anime faz.
 #[derive(Debug, Clone, Copy, serde::Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum RemoveMode {
-    /// Tira da Biblioteca e apaga os arquivos baixados (e os parciais).
     Everything,
-    /// Tira da Biblioteca, arquivos continuam na pasta.
     KeepFiles,
-    /// Continua na Biblioteca; apaga os arquivos e marca os episódios como
-    /// removidos (não baixa de novo sozinho, dá pra "Baixar de novo").
     FilesOnly,
 }
 
-/// Remove um anime (temporada). Sempre para os torrents dele — antes o
-/// registro sumia e o download seguia rodando. Devolve quantos arquivos não
-/// deu pra apagar (ex. aberto em outro programa).
 #[tauri::command]
 pub async fn remove_watch(state: State<'_, AppState>, id: i64, mode: RemoveMode) -> Result<u32, AppError> {
     let watch = db::watches::get(&state.db, id).await?;
@@ -93,7 +74,6 @@ pub async fn remove_watch(state: State<'_, AppState>, id: i64, mode: RemoveMode)
 
     let mut failed = 0u32;
     for ep in &episodes {
-        // Torrent rastreado: para (e apaga o arquivo/parcial junto, se for o caso).
         let _ = state.torrent.remove(ep.id, delete_files).await;
         if delete_files && ep.status == "available" {
             if let Some(path) = ep.item_path.as_deref() {
@@ -105,7 +85,6 @@ pub async fn remove_watch(state: State<'_, AppState>, id: i64, mode: RemoveMode)
             }
         }
     }
-    // Pasta só sai se ficou vazia — temporadas do mesmo anime podem dividir a pasta.
     if delete_files {
         let _ = std::fs::remove_dir(&watch.folder);
     }
@@ -162,9 +141,15 @@ pub async fn set_watch_list_status(
 
 #[tauri::command]
 pub async fn set_watch_preferences(
+    app: AppHandle,
     state: State<'_, AppState>,
     id: i64,
     prefs: WatchPreferences,
 ) -> Result<(), AppError> {
-    Ok(db::watches::set_preferences(&state.db, id, prefs).await?)
+    db::watches::set_preferences(&state.db, id, prefs).await?;
+    db::seen_items::forget_rejected(&state.db, id).await?;
+    tauri::async_runtime::spawn(async move {
+        engine::poll_watch_by_id(&app, id).await;
+    });
+    Ok(())
 }
