@@ -31,16 +31,16 @@
 
 ## ✨ Features
 
-- 📚 **Catalog and search.** Browse the current season and trending shows, or search any title, powered by AniList.
+- 📚 **Catalog and search.** Browse the current season and trending shows, search any title, or use Explore to filter by genre, status, format, season and score. Powered by AniList.
 - 🗂️ **Organized library.** Every anime in one place, with all of its seasons grouped together.
-- ⬇️ **Automatic downloads.** New episodes are found and downloaded as soon as they are released, matching your preferred quality and language. Stalled downloads switch to another source on their own.
+- ⬇️ **Automatic downloads.** New episodes are found and downloaded as soon as they are released, matching your preferred quality and language. Stalled downloads switch to another source on their own, and finished shows can be downloaded from season packs (only the episodes you need).
 - 📡 **Streaming mode.** Nothing is downloaded ahead of time: press play and the episode starts right away while it downloads. The next episode is prepared halfway through, and watched episodes are deleted afterwards. Episodes that are still downloading can also be watched right away.
 - ▶️ **Native video player.**
   - Lightweight and optimized, with resume and next episode.
   - Skips openings, endings and recaps, using AniSkip, the file's chapters or audio matching between episodes.
   - Ambient light around the video and customizable subtitles.
-- 💾 **Storage management** (optional, beta). Delete episodes after watching, remove unused audio tracks or reduce resolution to save disk space.
-- 🎬 **Jellyfin integration** (optional). Sends downloaded episodes straight to your Jellyfin library folder.
+- 💾 **Storage management** (optional). Delete episodes automatically after some days or 30 minutes after watching (in Torii or in Jellyfin), remove unused audio tracks or reduce resolution to save disk space.
+- 🎬 **Jellyfin integration** (optional). Sends downloaded episodes straight to your Jellyfin library folder and knows what you watched there.
 - 🎮 **Discord Rich Presence** (optional). Shows what you're watching on your Discord profile.
 - 🔄 **Automatic updates.** New versions are offered inside the app.
 
