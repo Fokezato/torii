@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, Eraser, FolderOpen, Inbox, Pause, Play, Users, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronDown, Eraser, FolderOpen, Inbox, Package, Pause, Play, Users, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { useNavigate } from "react-router-dom";
@@ -8,7 +8,9 @@ import { getStorageStats } from "@/lib/stats";
 import { formatBytes } from "@/lib/format";
 import {
   cancelEpisodeDownload,
+  listEpisodeSources,
   listRecentEpisodes,
+  packKey,
   onDownloadProgress,
   pauseEpisodeDownload,
   resumeEpisodeDownload,
@@ -20,12 +22,6 @@ import { parseEpisodeLabel } from "@/lib/episodeName";
 
 const DISMISSED_STORAGE_KEY = "torii:dismissed-downloads";
 
-// X num episódio já CONCLUÍDO só tira da visão de downloads (histórico) —
-// nunca mexe no arquivo nem some da Biblioteca (bug real reportado: "limpo
-// download e some da biblioteca"). Guardado local por viewer, não precisa
-// ser estado do app. Episódio ainda baixando/na fila usa `cancelEpisodeDownload`
-// de verdade em vez disso (ver `onCancel` no EpisodeRow) — aí não tem nada
-// "concluído" pra preservar, então cancelar o torrent é o esperado.
 function useDismissedDownloads() {
   const [dismissed, setDismissed] = useState<Set<number>>(() => {
     try {
@@ -43,7 +39,6 @@ function useDismissedDownloads() {
       try {
         localStorage.setItem(DISMISSED_STORAGE_KEY, JSON.stringify([...next]));
       } catch {
-        // best-effort
       }
       return next;
     });
@@ -55,7 +50,6 @@ function useDismissedDownloads() {
       try {
         localStorage.setItem(DISMISSED_STORAGE_KEY, JSON.stringify([...next]));
       } catch {
-        // best-effort
       }
       return next;
     });
@@ -160,7 +154,6 @@ function EpisodeRow({
   onResume: () => void;
   onDismiss: () => void;
   onCancel: () => void;
-  /** Assistir enquanto baixa. */
   onWatch: () => void;
 }) {
   const { t } = useTranslation();
@@ -192,7 +185,7 @@ function EpisodeRow({
           </span>
         </div>
         <p className="truncate text-[11px] text-[#6C7180]" title={episode.name ?? undefined}>
-          {parseEpisodeLabel(episode.name)}
+          {parseEpisodeLabel(episode.name, episode.episode_number)}
         </p>
 
         {isDownloading && (
@@ -268,6 +261,180 @@ function EpisodeRow({
   );
 }
 
+function PackRow({
+  episodes,
+  watchTitle,
+  coverUrl,
+  progressByEpisode,
+  onPause,
+  onResume,
+  onCancelAll,
+  onDismissAll,
+  onCancelOne,
+  onWatch,
+}: {
+  episodes: Episode[];
+  watchTitle: string;
+  coverUrl: string | null;
+  progressByEpisode: Record<number, DownloadProgress>;
+  onPause: () => void;
+  onResume: () => void;
+  onCancelAll: () => void;
+  onDismissAll: () => void;
+  onCancelOne: (ep: Episode) => void;
+  onWatch: (ep: Episode) => void;
+}) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const first = episodes[0];
+  const { data: sources } = useQuery({
+    queryKey: ["episode-sources", first.id],
+    queryFn: () => listEpisodeSources(first.id),
+    staleTime: Infinity,
+  });
+  const packTitle = sources?.find((s) => s.source_item_id === first.source_item_id)?.title ?? first.name ?? "";
+  const sorted = [...episodes].sort((a, b) => (a.episode_number ?? 0) - (b.episode_number ?? 0));
+  const numbers = sorted.map((e) => e.episode_number).filter((n): n is number => n != null);
+  const range = numbers.length ? `${numbers[0]}–${numbers[numbers.length - 1]}` : "";
+
+  let done = 0;
+  let total = 0;
+  for (const e of episodes) {
+    const p = progressByEpisode[e.id];
+    if (p) {
+      done += p.progress_bytes;
+      total += p.total_bytes;
+    }
+  }
+  const pct = total > 0 ? Math.min(100, (done / total) * 100) : 0;
+  const live = episodes.map((e) => progressByEpisode[e.id]).find((p) => p != null);
+  const downloading = episodes.some((e) => e.status === "downloading");
+  const allDone = episodes.every((e) => e.status === "available");
+  const paused = downloading && live?.state === "paused";
+  const ready = episodes.filter((e) => e.status === "available").length;
+  const failed = episodes.filter((e) => e.status === "error").length;
+
+  return (
+    <div className="rounded-[12px] border border-[#1E212A] bg-[#15171D]" style={{ opacity: paused ? 0.75 : 1 }}>
+      <div className="flex items-center gap-4 p-4">
+        <div className="size-11 shrink-0 overflow-hidden rounded-[8px] bg-[#262A35]">
+          {coverUrl && <img src={coverUrl} alt="" className="size-full object-cover" />}
+        </div>
+
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <div className="flex items-center gap-2.5">
+            <span className="truncate text-[13px] font-semibold">{watchTitle}</span>
+            <span className="flex shrink-0 items-center gap-1 rounded-[5px] bg-accent2 px-[7px] py-[3px] text-[9px] font-bold tracking-wide text-[#0B0C10] uppercase">
+              <Package className="size-2.5" />
+              {t("downloads.pack", { count: episodes.length })}
+            </span>
+            <StatusBadge status={allDone ? "available" : failed === episodes.length ? "error" : "downloading"} paused={!!paused} />
+            <span className="ml-auto shrink-0 text-[12px] text-[#8A8F9C]">
+              {total > 0 ? (allDone ? formatBytes(total) : `${formatBytes(done)} / ${formatBytes(total)}`) : ""}
+            </span>
+          </div>
+          <p className="truncate text-[11px] text-[#6C7180]" title={packTitle}>
+            {range && `${t("downloads.packEpisodes", { range })} · `}
+            {packTitle}
+          </p>
+
+          {!allDone && (
+            <>
+              <div className="h-1.5 overflow-hidden rounded-full bg-[#22252E]">
+                <div className="h-full rounded-full" style={{ width: `${pct}%`, background: paused ? "#4E5361" : "#FF6A45" }} />
+              </div>
+              <div className="flex items-center gap-4 text-[11px] text-[#6C7180]">
+                <span>{t("downloads.packReady", { ready, total: episodes.length })}</span>
+                <span>{pct.toFixed(0)}%</span>
+                {!paused && live && (
+                  <>
+                    <span className="flex items-center gap-1">
+                      <ArrowDown className="size-2.5" />
+                      {live.download_speed_mbps ? `${live.download_speed_mbps.toFixed(1)} MB/s` : "—"}
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <ArrowUp className="size-2.5" />
+                      {live.upload_speed_mbps ? `${live.upload_speed_mbps.toFixed(1)} MB/s` : "—"}
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <Users className="size-2.5" />
+                      {live.peers ?? 0}
+                    </span>
+                  </>
+                )}
+                {paused && <span>{t("downloads.pausedManually")}</span>}
+                {failed > 0 && <span className="text-destructive">{t("downloads.packFailed", { count: failed })}</span>}
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="flex shrink-0 items-center gap-2">
+          {downloading &&
+            (paused ? (
+              <IconBtn label={t("downloads.resume")} onClick={onResume} color="#FF6A45">
+                <Play className="size-3.5" fill="currentColor" />
+              </IconBtn>
+            ) : (
+              <IconBtn label={t("downloads.pause")} onClick={onPause}>
+                <Pause className="size-3.5" fill="currentColor" />
+              </IconBtn>
+            ))}
+          <IconBtn label={t("downloads.openFolder")} onClick={() => first.save_path && openPath(first.save_path)}>
+            <FolderOpen className="size-3.5" />
+          </IconBtn>
+          {allDone ? (
+            <IconBtn label={t("downloads.removeFromHistory")} onClick={onDismissAll}>
+              <X className="size-3.5" />
+            </IconBtn>
+          ) : (
+            <IconBtn label={t("downloads.cancelPack")} onClick={onCancelAll} color="#E5484D">
+              <X className="size-3.5" />
+            </IconBtn>
+          )}
+          <IconBtn label={open ? t("downloads.hideEpisodes") : t("downloads.showEpisodes")} onClick={() => setOpen((v) => !v)}>
+            <ChevronDown className={`size-3.5 transition-transform ${open ? "rotate-180" : ""}`} />
+          </IconBtn>
+        </div>
+      </div>
+
+      {open && (
+        <div className="flex flex-col gap-1 border-t border-[#1E212A] px-4 py-3">
+          {sorted.map((ep) => {
+            const p = progressByEpisode[ep.id];
+            const epPct = p && p.total_bytes > 0 ? Math.min(100, (p.progress_bytes / p.total_bytes) * 100) : ep.status === "available" ? 100 : 0;
+            return (
+              <div key={ep.id} className="flex items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-white/[0.03]">
+                <span className="w-24 shrink-0 truncate text-[12px] font-medium" title={ep.name ?? undefined}>
+                  {parseEpisodeLabel(ep.name, ep.episode_number)}
+                </span>
+                <StatusBadge status={ep.status} paused={false} />
+                <div className="h-1 flex-1 overflow-hidden rounded-full bg-[#22252E]">
+                  <div
+                    className="h-full rounded-full"
+                    style={{ width: `${epPct}%`, background: ep.status === "available" ? "#6FC48A" : "#FF6A45" }}
+                  />
+                </div>
+                <span className="w-9 shrink-0 text-right text-[11px] text-[#6C7180]">{epPct.toFixed(0)}%</span>
+                {(ep.status === "downloading" || ep.status === "available") && (
+                  <IconBtn label={t("detail.watchNow")} onClick={() => onWatch(ep)} color="#FF6A45">
+                    <Play className="size-3" fill="currentColor" />
+                  </IconBtn>
+                )}
+                {ep.status !== "available" && (
+                  <IconBtn label={t("downloads.cancel")} onClick={() => onCancelOne(ep)} color="#E5484D">
+                    <X className="size-3" />
+                  </IconBtn>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Downloads() {
   const { t } = useTranslation();
   const [filter, setFilter] = useState<(typeof FILTERS)[number]["id"]>("all");
@@ -307,9 +474,6 @@ export default function Downloads() {
   }, [watches]);
 
   const visibleEpisodes = useMemo(
-    // "pending" = placeholder que ainda nem foi procurado no Nyaa (ver
-    // create_placeholder no Rust) — não é um download de verdade, não
-    // pertence aqui, só na lista de episódios da Biblioteca.
     () => episodes.filter((e) => e.status !== "deleted" && e.status !== "pending" && !dismissed.has(e.id)),
     [episodes, dismissed],
   );
@@ -322,18 +486,43 @@ export default function Downloads() {
 
   const filtered = filter === "all" ? visibleEpisodes : visibleEpisodes.filter((e) => e.status === filter);
 
-  // Tira os concluídos da lista (não mexe em arquivo nem na Biblioteca).
-  // Erros ficam — precisam de atenção.
   const clearable = visibleEpisodes.filter((e) => e.status === "available");
 
-  const totalDownloadSpeed = Object.values(progressByEpisode).reduce(
-    (sum, p) => sum + (p.download_speed_mbps ?? 0),
-    0,
-  );
-  const totalUploadSpeed = Object.values(progressByEpisode).reduce(
-    (sum, p) => sum + (p.upload_speed_mbps ?? 0),
-    0,
-  );
+  // A pack reports the same torrent speed on each of its episodes: count it once.
+  const torrentProgress = useMemo(() => {
+    const byTorrent = new Map<string, DownloadProgress>();
+    for (const e of episodes) {
+      const p = progressByEpisode[e.id];
+      const key = packKey(e) ?? `episode:${e.id}`;
+      if (p && !byTorrent.has(key)) byTorrent.set(key, p);
+    }
+    return [...byTorrent.values()];
+  }, [episodes, progressByEpisode]);
+  const totalDownloadSpeed = torrentProgress.reduce((sum, p) => sum + (p.download_speed_mbps ?? 0), 0);
+  const totalUploadSpeed = torrentProgress.reduce((sum, p) => sum + (p.upload_speed_mbps ?? 0), 0);
+  const downloadingTorrents = new Set(
+    visibleEpisodes.filter((e) => e.status === "downloading").map((e) => packKey(e) ?? `episode:${e.id}`),
+  ).size;
+
+  const rows = useMemo(() => {
+    const out: { key: string; episodes: Episode[] }[] = [];
+    const index = new Map<string, number>();
+    for (const e of filtered) {
+      const key = packKey(e);
+      if (key && index.has(key)) {
+        out[index.get(key)!].episodes.push(e);
+      } else {
+        if (key) index.set(key, out.length);
+        out.push({ key: key ?? `episode:${e.id}`, episodes: [e] });
+      }
+    }
+    return out;
+  }, [filtered]);
+
+  const watchEpisode = (ep: Episode) => {
+    if (ep.episode_number != null) navigate(`/watch/${ep.watch_id}/${ep.episode_number}`);
+  };
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ["recent-episodes"] });
 
   return (
     <div className="flex flex-col gap-[22px]">
@@ -347,7 +536,7 @@ export default function Downloads() {
       <div className="flex gap-3.5">
         <StatTile
           label={t("downloads.downloadingNow")}
-          value={t("downloads.torrentCount", { count: counts.downloading ?? 0 })}
+          value={t("downloads.torrentCount", { count: downloadingTorrents })}
         />
         <StatTile
           label={t("downloads.downloadSpeed")}
@@ -401,8 +590,32 @@ export default function Downloads() {
         </div>
       ) : (
         <div className="flex flex-col gap-2.5">
-          {filtered.map((episode) => {
+          {rows.map(({ key, episodes: group }) => {
+            const episode = group[0];
             const watch = watchById.get(episode.watch_id);
+            if (packKey(episode)) {
+              const active = group.find((e) => e.status === "downloading") ?? episode;
+              return (
+                <PackRow
+                  key={key}
+                  episodes={group}
+                  watchTitle={watch?.title ?? "Anime"}
+                  coverUrl={watch?.cover_url ?? null}
+                  progressByEpisode={progressByEpisode}
+                  onPause={() => pauseEpisodeDownload(active.id)}
+                  onResume={() => resumeEpisodeDownload(active.id)}
+                  onDismissAll={() => dismissMany(group.map((e) => e.id))}
+                  onCancelAll={async () => {
+                    for (const e of group.filter((e) => e.status !== "available")) {
+                      await cancelEpisodeDownload(e.id, true).catch(() => {});
+                    }
+                    refresh();
+                  }}
+                  onCancelOne={(e) => cancelEpisodeDownload(e.id, true).then(refresh)}
+                  onWatch={watchEpisode}
+                />
+              );
+            }
             return (
               <EpisodeRow
                 key={episode.id}
@@ -413,10 +626,7 @@ export default function Downloads() {
                 onPause={() => pauseEpisodeDownload(episode.id)}
                 onResume={() => resumeEpisodeDownload(episode.id)}
                 onDismiss={() => dismiss(episode.id)}
-                onWatch={() => {
-                  const n = episode.episode_number;
-                  if (n != null) navigate(`/watch/${episode.watch_id}/${n}`);
-                }}
+                onWatch={() => watchEpisode(episode)}
                 onCancel={() =>
                   cancelEpisodeDownload(episode.id, true).then(() =>
                     queryClient.invalidateQueries({ queryKey: ["recent-episodes"] }),

@@ -3,10 +3,6 @@ use std::path::PathBuf;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 
-/// Nome limpo pra notificação: "Nome Base — Episódio N", sem tag de
-/// qualidade/codec/grupo do release cru (que quebra o layout da janela de
-/// notificação, que é pequena de propósito). Cai pro nome base sozinho se
-/// não achar número de episódio reconhecível no título cru.
 fn notify_episode_title(watch_title: &str, raw_episode_title: &str) -> String {
     let (base, _) = nyaa::split_season(watch_title);
     match nyaa::extract_episode_number(raw_episode_title) {
@@ -15,17 +11,6 @@ fn notify_episode_title(watch_title: &str, raw_episode_title: &str) -> String {
     }
 }
 
-/// Pede pro engine de torrent baixar um episódio já salvo no banco (status
-/// "found") e reflete o resultado de volta no banco + no log de atividade.
-/// Reusado tanto no fluxo normal (achou candidato novo) quanto na
-/// reconciliação de boot (episódios que ficaram "found"/"downloading" de uma
-/// sessão anterior, já que o `TorrentEngine` não lembra nada entre restarts).
-/// `notify_found`: manda ou não a notificação individual de "achou 1
-/// episódio". `poll_watch` passa `false` e manda uma notificação só,
-/// resumida, quando o lote tem mais de um episódio — sem isso, uma busca
-/// que acha 20 episódios de uma vez (comum ao adicionar um anime que já tá
-/// no ar há tempo) empilha 20 notificações de 5s cada, "travando" a janela
-/// por 100s+. `resume_pending_downloads` (boot, poucos itens) passa `true`.
 pub async fn start_download(
     app: &AppHandle,
     state: &AppState,
@@ -36,9 +21,10 @@ pub async fn start_download(
     folder: &str,
     cover_url: Option<String>,
     notify_found: bool,
+    file_index: Option<usize>,
 ) {
     let clean_title = notify_episode_title(watch_title, title);
-    match state.torrent.add_download(episode_id, magnet, folder).await {
+    match state.torrent.add_download(episode_id, magnet, folder, file_index).await {
         Ok(info_hash) => {
             if let Err(e) = db::episodes::mark_downloading(&state.db, episode_id, &info_hash).await {
                 state.activity.error(tr!("Erro ao salvar estado de download de \"{clean_title}\": {e}", "Failed to save download state of \"{clean_title}\": {e}"));
@@ -86,6 +72,185 @@ pub(crate) fn split_langs(raw: &Option<String>) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// The anime's own titles, most specific first (see `nyaa::is_other_work`).
+fn watch_names(watch: &db::watches::Watch) -> Vec<String> {
+    let mut names = vec![nyaa::split_season(&watch.query).0, nyaa::split_season(&watch.title).0];
+    names.extend(watch.series_title.clone());
+    names.sort_by_key(|n| std::cmp::Reverse(n.len()));
+    names.dedup();
+    names
+}
+
+fn nothing_matching(
+    watch: &db::watches::Watch,
+    rejected: &nyaa::Rejections,
+    audio_langs: &[String],
+    sub_langs: &[String],
+) -> String {
+    let mut reasons = Vec::new();
+    if rejected.language > 0 {
+        let mut wanted = Vec::new();
+        if !audio_langs.is_empty() {
+            wanted.push(tr!("áudio {}", "audio {}", audio_langs.join("/")));
+        }
+        if !sub_langs.is_empty() {
+            wanted.push(tr!("legenda {}", "subtitles {}", sub_langs.join("/")));
+        }
+        reasons.push(tr!(
+            "{} sem o idioma escolhido ({})",
+            "{} without the chosen language ({})",
+            rejected.language,
+            wanted.join(", ")
+        ));
+    }
+    if rejected.other_work > 0 {
+        reasons.push(tr!(
+            "{} de outra obra (filme, OVA ou outra temporada)",
+            "{} from another work (movie, OVA or another season)",
+            rejected.other_work
+        ));
+    }
+    if rejected.quality > 0 {
+        reasons.push(tr!("{} em outra qualidade", "{} in another quality", rejected.quality));
+    }
+    if rejected.season > 0 {
+        reasons.push(tr!("{} de outra temporada", "{} from another season", rejected.season));
+    }
+    if rejected.range > 0 {
+        reasons.push(tr!("{} fora do intervalo de episódios", "{} outside the episode range", rejected.range));
+    }
+    if reasons.is_empty() {
+        return tr!("Nada compatível ainda pra \"{}\"", "Nothing matching yet for \"{}\"", watch.title);
+    }
+    tr!(
+        "Nada compatível pra \"{}\": {}",
+        "Nothing matching for \"{}\": {}",
+        watch.title,
+        reasons.join(", ")
+    )
+}
+
+/// Pack episodes that failed to start keep their pack and file; they are retried here
+/// because the pack itself is already marked as seen.
+async fn retry_pack_errors(app: &AppHandle, state: &AppState, watch: &db::watches::Watch) {
+    let Ok(episodes) = db::episodes::list_for_watch(&state.db, watch.id).await else { return };
+    for ep in episodes.into_iter().filter(|e| e.status == "error") {
+        let (Some(index), Some(magnet)) = (ep.file_index, ep.magnet_uri.as_deref()) else { continue };
+        if watch.streaming {
+            let _ = db::episodes::mark_ready(&state.db, ep.id).await;
+            continue;
+        }
+        let name = ep.name.clone().unwrap_or_default();
+        start_download(
+            app,
+            state,
+            ep.id,
+            &watch.title,
+            &name,
+            magnet,
+            &watch.folder,
+            watch.cover_url.clone(),
+            false,
+            Some(index as usize),
+        )
+        .await;
+    }
+}
+
+/// Season packs: episodes still missing get their file from a pack (best seeded first).
+async fn assign_packs(
+    app: &AppHandle,
+    state: &AppState,
+    watch: &db::watches::Watch,
+    packs: &[nyaa::NyaaCandidate],
+    names: &[String],
+) -> u32 {
+    const MAX_PACKS: usize = 3;
+    if packs.is_empty() {
+        return 0;
+    }
+    let season = nyaa::split_season(&watch.query).1.unwrap_or(1);
+    let Ok(episodes) = db::episodes::list_for_watch(&state.db, watch.id).await else { return 0 };
+    let in_range = |n: i64| watch.episode_start.map_or(true, |s| n >= s) && watch.episode_end.map_or(true, |e| n <= e);
+    let mut missing: std::collections::HashMap<u32, db::episodes::Episode> = episodes
+        .into_iter()
+        .filter(|e| matches!(e.status.as_str(), "pending" | "error"))
+        .filter_map(|e| {
+            let n = e.episode_number.filter(|n| in_range(*n))?;
+            Some((n as u32, e))
+        })
+        .collect();
+    if missing.is_empty() {
+        return 0;
+    }
+
+    let mut packs: Vec<&nyaa::NyaaCandidate> = packs.iter().collect();
+    packs.sort_by_key(|p| std::cmp::Reverse(p.seeders.unwrap_or(0)));
+    let mut assigned = 0u32;
+    for pack in packs.into_iter().take(MAX_PACKS) {
+        if missing.is_empty() {
+            break;
+        }
+        let files = match state.torrent.list_files(&pack.magnet).await {
+            Ok(files) => files,
+            Err(e) => {
+                state.activity.info(tr!("Pacote sem resposta ({}): {e}", "Pack not responding ({}): {e}", pack.title));
+                continue;
+            }
+        };
+        let mut by_episode: std::collections::HashMap<u32, crate::torrent_engine::PackFile> = std::collections::HashMap::new();
+        for file in files {
+            if let Some(n) = nyaa::pack_file_episode(&file.path, names, season) {
+                if by_episode.get(&n).map_or(true, |f| file.len > f.len) {
+                    by_episode.insert(n, file);
+                }
+            }
+        }
+        let mut covered: Vec<u32> = missing.keys().filter(|n| by_episode.contains_key(n)).copied().collect();
+        covered.sort_unstable();
+        let _ = db::seen_items::mark_seen(&state.db, watch.id, &pack.id, &pack.title, !covered.is_empty()).await;
+        if covered.is_empty() {
+            continue;
+        }
+        state.activity.info(tr!(
+            "Pacote da temporada com {} episódios de \"{}\": {}",
+            "Season pack with {} episodes of \"{}\": {}",
+            covered.len(),
+            watch.title,
+            pack.title
+        ));
+        for n in covered {
+            let (Some(episode), Some(file)) = (missing.remove(&n), by_episode.get(&n)) else { continue };
+            let name = file.path.rsplit(['/', '\\']).next().unwrap_or(&pack.title).to_string();
+            if db::episodes::switch_source(&state.db, episode.id, &pack.id, &name, &pack.magnet).await.is_err() {
+                continue;
+            }
+            let _ = db::episodes::set_file_index(&state.db, episode.id, Some(file.index as i64)).await;
+            let _ = db::episode_sources::add_pack_source(&state.db, episode.id, pack, file.index as i64).await;
+            let _ = db::episode_sources::set_active(&state.db, episode.id, &pack.id).await;
+            if watch.streaming {
+                let _ = db::episodes::mark_ready(&state.db, episode.id).await;
+            } else {
+                start_download(
+                    app,
+                    state,
+                    episode.id,
+                    &watch.title,
+                    &name,
+                    &pack.magnet,
+                    &watch.folder,
+                    watch.cover_url.clone(),
+                    false,
+                    Some(file.index),
+                )
+                .await;
+            }
+            assigned += 1;
+        }
+    }
+    assigned
+}
+
 pub async fn poll_watch(app: &AppHandle, state: &AppState, watch: &db::watches::Watch) {
     let audio_langs = split_langs(&watch.audio_lang);
     let sub_langs = split_langs(&watch.sub_lang);
@@ -100,9 +265,11 @@ pub async fn poll_watch(app: &AppHandle, state: &AppState, watch: &db::watches::
 
     state.activity.info(tr!("Procurando episódios de \"{}\"...", "Searching episodes of \"{}\"...", watch.title));
 
+    let names = watch_names(watch);
     let result = nyaa::find_new_matches(
         &state.http,
         &watch.query,
+        &names,
         &watch.quality,
         &audio_langs,
         &sub_langs,
@@ -120,43 +287,23 @@ pub async fn poll_watch(app: &AppHandle, state: &AppState, watch: &db::watches::
         }
     };
 
-    // Candidato SEM match marca visto já aqui — não precisa de nenhum
-    // processamento, seguro esquecer pra sempre. Candidato COM match só
-    // marca visto depois de tentar processar (dentro do loop abaixo) — se o
-    // app cair/reiniciar no meio do lote, ver comentário lá.
     for candidate in &result.all_new {
         let is_matched = result
             .matched
             .iter()
             .any(|m| m.primary.id == candidate.id || m.alternates.iter().any(|a| a.id == candidate.id));
-        if !is_matched {
+        let is_pack = result.batches.iter().any(|b| b.id == candidate.id);
+        if !is_matched && !is_pack {
             let _ = db::seen_items::mark_seen(&state.db, watch.id, &candidate.id, &candidate.title, false).await;
         }
     }
 
-    if result.matched.is_empty() {
-        if !result.all_new.is_empty() {
-            state.activity.info(tr!("Nada compatível ainda pra \"{}\"", "Nothing matching yet for \"{}\"", watch.title));
-        }
-        return;
-    }
-
-    // Achar 1 episódio novo = notificação individual de sempre. Achar vários
-    // de uma vez (comum ao adicionar um anime que já tá no ar há tempo, ou
-    // reprocessar depois de limpar o ledger) manda notificação por episódio
-    // achado, que empilha uma fila de 5s cada — "trava" a janela por minutos.
-    // Em lote, manda notificação por item MAS resume numa só no final.
-    let batch = result.matched.len() > 1;
+    let batch = result.matched.len() > 1 || !result.batches.is_empty();
     let mut started = 0u32;
 
     for episode_match in &result.matched {
         let candidate = &episode_match.primary;
 
-        // Marca visto só agora, ao alcançar o item no loop — não antes, em
-        // lote, pra um episódio nunca-tentado (loop interrompido por um
-        // anterior travado/reinício do app) não ficar "visto" pra sempre
-        // sem nunca ter virado download de verdade (bug real: Re:ZERO S3
-        // sempre parava no mesmo episódio e o resto nunca era retentado).
         let _ = db::seen_items::mark_seen(&state.db, watch.id, &candidate.id, &candidate.title, true).await;
         for alt in &episode_match.alternates {
             let _ = db::seen_items::mark_seen(&state.db, watch.id, &alt.id, &alt.title, true).await;
@@ -178,18 +325,9 @@ pub async fn poll_watch(app: &AppHandle, state: &AppState, watch: &db::watches::
         .await;
 
         match outcome {
-            // "pending" (placeholder criado ao adicionar o anime, ver
-            // `create_placeholder`), "found" (linha nova) ou "error"
-            // (tentativa anterior falhou) — todos elegíveis pra associar
-            // essa fonte e (re)iniciar. "downloading"/"available" já tão
-            // resolvidos, "deleted" é terminal (retenção) — não mexe.
             Ok(episode) if matches!(episode.status.as_str(), "pending" | "found" | "error") => {
                 let clean_title = notify_episode_title(&watch.title, &candidate.title);
                 if episode.status == "error" {
-                    // Já existia linha desse episódio, mas a tentativa
-                    // anterior (outra fonte, talvez a mesma) deu erro —
-                    // troca a fonte em vez de empilhar linha nova (bug real
-                    // reportado: 2 linhas de "Episódio 4", ambas com erro).
                     state.activity.info(tr!("Tentando de novo: {clean_title}", "Retrying: {clean_title}"));
                 } else {
                     state.activity.info(format!("Encontrado: {clean_title}"));
@@ -214,7 +352,6 @@ pub async fn poll_watch(app: &AppHandle, state: &AppState, watch: &db::watches::
                 }
                 let _ = db::episode_sources::set_active(&state.db, episode.id, &candidate.id).await;
                 if watch.streaming {
-                    // Modo Streaming: só guarda a fonte; baixa ao abrir no player.
                     if let Err(e) = db::episodes::mark_ready(&state.db, episode.id).await {
                         state.activity.error(tr!("Erro ao salvar fonte de \"{clean_title}\": {e}", "Failed to save source of \"{clean_title}\": {e}"));
                         continue;
@@ -242,6 +379,7 @@ pub async fn poll_watch(app: &AppHandle, state: &AppState, watch: &db::watches::
                         &watch.folder,
                         watch.cover_url.clone(),
                         !batch,
+                        None,
                     )
                     .await;
                 }
@@ -257,6 +395,13 @@ pub async fn poll_watch(app: &AppHandle, state: &AppState, watch: &db::watches::
                 .activity
                 .error(tr!("Erro ao salvar episódio de \"{}\": {e}", "Failed to save episode of \"{}\": {e}", watch.title)),
         }
+    }
+
+    retry_pack_errors(app, state, watch).await;
+    let from_packs = assign_packs(app, state, watch, &result.batches, &names).await;
+    started += from_packs;
+    if result.matched.is_empty() && from_packs == 0 && !result.all_new.is_empty() {
+        state.activity.info(nothing_matching(watch, &result.rejected, &audio_langs, &sub_langs));
     }
 
     if batch && started > 0 {
@@ -279,10 +424,6 @@ pub async fn poll_watch(app: &AppHandle, state: &AppState, watch: &db::watches::
     }
 }
 
-/// Roda uma vez no boot: o `TorrentEngine` é uma sessão nova a cada start do
-/// app (sem persistência própria ainda), então qualquer episódio que ficou
-/// "found" (nunca chegou a iniciar) ou "downloading" (app fechou no meio) de
-/// uma sessão anterior precisa ser re-adicionado pra voltar a ser rastreado.
 pub async fn resume_pending_downloads(app: AppHandle) {
     let app = &app;
     let state = app.state::<AppState>();
@@ -294,8 +435,6 @@ pub async fn resume_pending_downloads(app: AppHandle) {
         }
     }
 
-    // Mesma lógica de lote do poll_watch: reconciliar vários pendentes de
-    // uma vez no boot não pode empilhar uma notificação por item.
     let notify_individually = pending.len() <= 1;
 
     for ep in pending {
@@ -316,24 +455,19 @@ pub async fn resume_pending_downloads(app: AppHandle) {
             save_path,
             watch.cover_url,
             notify_individually,
+            ep.file_index.map(|i| i as usize),
         )
         .await;
     }
 }
 
-/// Renomeia o arquivo baixado pra "Nome do Anime S0NE0M Título do
-/// Episódio.ext", descartando tag de qualidade/codec/grupo do release —
-/// deixa o disco organizado igual um app de streaming, e ajuda o Jellyfin
-/// a casar o episódio certo. Best-effort: qualquer falha só loga, não
-/// impede o episódio de ser marcado "available". Devolve o path final do
-/// arquivo (renomeado ou original, se o rename não rolou) pra quem chama
-/// poder usar na sincronização com o Jellyfin.
 async fn rename_to_clean_filename(state: &AppState, episode_id: i64, watch_id: i64) -> Option<PathBuf> {
     let old_path = state.torrent.primary_file_path(episode_id).await?;
-    // Grava o caminho já — os retornos abaixo sem renomear (nome já limpo,
-    // sem nome limpo possível) deixavam `item_path` vazio, e o player
-    // recebia a PASTA do anime (o VLC tocava o 1º arquivo dela).
     let _ = db::episodes::set_item_path(&state.db, episode_id, &old_path.to_string_lossy()).await;
+    // Files inside a season pack stay as they are: the pack is still downloading the others.
+    if db::episodes::get(&state.db, episode_id).await.is_ok_and(|e| e.file_index.is_some()) {
+        return Some(old_path);
+    }
     let Ok(watch) = db::watches::get(&state.db, watch_id).await else {
         return Some(old_path);
     };
@@ -360,10 +494,6 @@ async fn rename_to_clean_filename(state: &AppState, episode_id: i64, watch_id: i
     }
 }
 
-/// Pede refresh da pasta pro Jellyfin e tenta achar o item correspondente
-/// pra guardar o `jellyfin_item_id` (usado depois pra deletar certo na
-/// limpeza por retenção). Roda em background separado do reconciler porque
-/// o Jellyfin pode levar até uns 30s pra terminar de escanear.
 async fn sync_jellyfin_after_download(app: AppHandle, episode_id: i64, file_path: PathBuf) {
     let state = app.state::<AppState>();
     let settings = match db::settings::get_all(&state.db).await {
@@ -419,9 +549,6 @@ async fn sync_jellyfin_after_download(app: AppHandle, episode_id: i64, file_path
     }
 }
 
-/// Roda uma vez no boot: episódios que já ficaram "available" sem um
-/// `jellyfin_item_id" (ex. baixados antes da integração Jellyfin existir,
-/// ou que a primeira tentativa de match falhou) tentam de novo.
 pub async fn resync_jellyfin_library(app: AppHandle) {
     let state = app.state::<AppState>();
     let Ok(episodes) = db::episodes::list_by_status(&state.db, "available").await else {
@@ -439,11 +566,6 @@ pub async fn resync_jellyfin_library(app: AppHandle) {
     }
 }
 
-/// Consulta o progresso de todo torrent rastreado a cada tick, emite pro
-/// front via evento, e persiste quando um episódio termina de baixar.
-/// Busca agora a melhor fonte pra esse episódio e começa a baixar ("Forçar
-/// verificação", "Baixar de novo", "Baixar episódios"). `Ok(false)` = nada
-/// achado no Nyaa ainda.
 pub async fn force_download_episode(
     app: &AppHandle,
     state: &AppState,
@@ -492,15 +614,12 @@ pub async fn force_download_episode(
         &watch.folder,
         watch.cover_url,
         notify,
+        None,
     )
     .await;
     Ok(true)
 }
 
-/// Deixa o episódio pronto pra assistir por stream: começa o download (fonte
-/// já achada pelo poller, ou busca agora no Nyaa) e espera os metadados do
-/// torrent. Usado ao abrir um episódio de anime em modo Streaming (ou um que
-/// já está baixando). Erro = nenhuma fonte / torrent sem peers.
 pub async fn start_stream(app: &AppHandle, state: &AppState, episode_id: i64) -> Result<(), crate::error::AppError> {
     use crate::error::AppError;
     if state.torrent.stream_target(episode_id).await.is_some() {
@@ -514,8 +633,19 @@ pub async fn start_stream(app: &AppHandle, state: &AppState, episode_id: i64) ->
     match known_source {
         Some(magnet) => {
             let title = episode.name.as_deref().unwrap_or("episódio");
-            start_download(app, state, episode_id, &watch.title, title, magnet, &watch.folder, watch.cover_url.clone(), false)
-                .await;
+            start_download(
+                app,
+                state,
+                episode_id,
+                &watch.title,
+                title,
+                magnet,
+                &watch.folder,
+                watch.cover_url.clone(),
+                false,
+                episode.file_index.map(|i| i as usize),
+            )
+            .await;
         }
         None => {
             if !force_download_episode(app, state, episode_id, false).await? {
@@ -537,8 +667,6 @@ pub async fn start_stream(app: &AppHandle, state: &AppState, episode_id: i64) ->
     Err(AppError::Fetch(message))
 }
 
-/// Anime em modo Streaming: começa a baixar o episódio seguinte a
-/// `episode_number` (chamado na metade do atual), pra ele abrir na hora.
 pub async fn prefetch_next(app: &AppHandle, state: &AppState, watch_id: i64, episode_number: i64) {
     let Ok(watch) = db::watches::get(&state.db, watch_id).await else { return };
     if !watch.streaming {
@@ -559,8 +687,6 @@ pub async fn prefetch_next(app: &AppHandle, state: &AppState, watch_id: i64, epi
     }
 }
 
-/// Cancela o torrent atual do episódio (apagando o parcial) e recomeça pela
-/// fonte `source_item_id`, que tem que estar em `episode_sources`.
 pub async fn switch_source(
     app: &AppHandle,
     state: &AppState,
@@ -572,6 +698,7 @@ pub async fn switch_source(
     db::episodes::switch_source(&state.db, episode_id, &source.source_item_id, &source.title, &source.magnet_uri)
         .await?;
     db::episode_sources::set_active(&state.db, episode_id, source_item_id).await?;
+    db::episodes::set_file_index(&state.db, episode_id, source.file_index).await?;
 
     let episode = db::episodes::get(&state.db, episode_id).await?;
     let watch = db::watches::get(&state.db, episode.watch_id).await?;
@@ -585,21 +712,16 @@ pub async fn switch_source(
         &watch.folder,
         watch.cover_url,
         true,
+        source.file_index.map(|i| i as usize),
     )
     .await;
     Ok(())
 }
 
-/// Tempo sem receber nenhum byte pra considerar o download travado. A
-/// contagem de seeds do Nyaa costuma estar desatualizada: torrent "com 11
-/// seeds" que ninguém mais semeia de verdade (confirmado no qBittorrent).
 const STALL_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
-/// Progresso visto por episódio: (bytes, quando mudou pela última vez).
 type StallTracker = std::collections::HashMap<i64, (u64, std::time::Instant)>;
 
-/// Download travado → troca pra melhor fonte alternativa ainda não tentada.
-/// `tried` guarda as fontes já usadas nesta sessão pra não ficar em ciclo.
 async fn handle_stalled(
     app: &AppHandle,
     state: &AppState,
@@ -613,7 +735,6 @@ async fn handle_stalled(
     for s in sources.iter().filter(|s| s.is_active == 1) {
         tried_here.insert(s.source_item_id.clone());
     }
-    // `list` já vem ordenado por seeds (maior primeiro).
     let Some(next) = sources.iter().find(|s| !tried_here.contains(&s.source_item_id)) else {
         return;
     };
@@ -641,8 +762,6 @@ pub fn spawn_download_reconciler(app: AppHandle) {
                 let state = app.state::<AppState>();
                 let snapshot = state.torrent.snapshot().await;
 
-                // Travado = rodando (não pausado/terminado) e sem byte novo
-                // há STALL_TIMEOUT. Pausa manual zera a contagem.
                 let now = std::time::Instant::now();
                 let mut stalled = Vec::new();
                 stall.retain(|id, _| snapshot.iter().any(|(e, _)| e == id));
@@ -680,9 +799,6 @@ pub fn spawn_download_reconciler(app: AppHandle) {
                 let _ = app.emit("downloads:progress", payload);
 
                 for (episode_id, stats) in snapshot {
-                    // Continua rastreado após terminar (pra "remover" funcionar
-                    // depois), então isso roda de novo a cada tick — só avisa
-                    // e persiste na primeira vez que detecta a transição.
                     if stats.finished {
                         let Ok(episode) = db::episodes::get(&state.db, episode_id).await else {
                             continue;
@@ -752,11 +868,33 @@ pub async fn poll_once(app: &AppHandle, state: &AppState) {
     }
 }
 
-/// Remove um episódio de vez: tira do motor de torrent ANTES de apagar o
-/// arquivo (o torrent segue rastreado/semeando depois de terminar — apagar
-/// só o arquivo fazia o librqbit baixar de novo o que sumiu), apaga o
-/// arquivo, remove do Jellyfin se configurado e marca "deleted" — status
-/// terminal, o poller nunca mais baixa esse episódio (ver `poll_watch`).
+/// Deletes an episode on request: files, torrent and Jellyfin item. "deleted" is final,
+/// so the poller never downloads it again (only "Download again" does).
+pub async fn delete_episode(state: &AppState, episode_id: i64) -> Result<(), crate::error::AppError> {
+    let ep = db::episodes::get(&state.db, episode_id).await?;
+    let watch = db::watches::get(&state.db, ep.watch_id).await?;
+    let settings = db::settings::get_all(&state.db).await.unwrap_or_default();
+    let jellyfin = match (
+        settings.get("jellyfin_mode").map(String::as_str) == Some("1"),
+        settings.get("jellyfin_url").filter(|s| !s.is_empty()),
+        settings.get("jellyfin_api_key").filter(|s| !s.is_empty()),
+    ) {
+        (true, Some(url), Some(key)) => Some((url, key)),
+        _ => None,
+    };
+    let _ = state.torrent.remove(ep.id, true).await;
+    let raw = ep.name.clone().unwrap_or_else(|| tr!("episódio #{}", "episode #{}", ep.id));
+    let clean_title = notify_episode_title(&watch.title, &raw);
+    if !remove_episode(state, &ep, &clean_title, jellyfin).await {
+        return Err(crate::error::AppError::Fetch(tr!(
+            "Não foi possível excluir o episódio",
+            "Couldn't delete the episode"
+        )));
+    }
+    state.activity.info(tr!("Episódio excluído: {clean_title}", "Episode deleted: {clean_title}"));
+    Ok(())
+}
+
 async fn remove_episode(
     state: &AppState,
     ep: &db::episodes::Episode,
@@ -787,17 +925,6 @@ async fn remove_episode(
     true
 }
 
-/// Apaga episódios "available" que:
-/// - passaram do tempo de retenção (`delete_after_days` do watch, ou o
-///   default global) — sem retenção configurada = nunca por esse motivo;
-/// - ou foram assistidos há mais de `delete_after_watched_hours`, se
-///   "apagar depois de assistir" estiver ligado.
-///
-/// `playing_path`: arquivo aberto no player agora — nunca é apagado (no
-/// Windows nem daria, arquivo em uso; e seria apagar no meio da sessão).
-/// Episódios prontos sem `item_path` (bug antigo, ver
-/// `rename_to_clean_filename`): acha o arquivo na pasta pelo "SxxEyy" do
-/// nome do release. Roda no boot.
 pub async fn repair_missing_item_paths(state: &AppState) {
     let Ok(episodes) = db::episodes::list_by_status(&state.db, "available").await else { return };
     let tag = regex::Regex::new(r"(?i)S(\d{1,2})E(\d{1,3})").unwrap();
@@ -830,15 +957,10 @@ pub async fn repair_missing_item_paths(state: &AppState) {
     }
 }
 
-/// Episódio "pronto" cujo arquivo sumiu (apagado na mão pela pasta) vira
-/// "removido" — senão a Biblioteca seguia mostrando pronto e o player
-/// falhava ao abrir. Atualiza a lista recebida também.
 pub async fn reconcile_missing_files(state: &AppState, episodes: &mut [db::episodes::Episode]) {
     for ep in episodes.iter_mut().filter(|e| e.status == "available") {
         let Some(path) = ep.item_path.as_deref() else { continue };
         let file = std::path::Path::new(path);
-        // Pós-processamento trocando o arquivo neste instante (ver
-        // `media_file::run_and_replace`): some por um momento, não apagou.
         if file.exists()
             || file.with_extension("torii-old.mkv").exists()
             || file.with_extension("torii-tmp.mkv").exists()
@@ -858,6 +980,76 @@ pub async fn reconcile_missing_files(state: &AppState, episodes: &mut [db::episo
     }
 }
 
+/// Deleted this long after being watched (Torii's player or Jellyfin).
+const WATCHED_DELETE_DELAY: chrono::Duration = chrono::Duration::minutes(30);
+const WATCHED_CHECK_EVERY: Duration = Duration::from_secs(5 * 60);
+
+/// Episodes finished in Jellyfin count as watched in Torii: by the chosen user, or by any
+/// user when none is chosen. Other users' watching is ignored.
+pub async fn sync_jellyfin_watched(state: &AppState) {
+    let Ok(settings) = db::settings::get_all(&state.db).await else { return };
+    let (true, Some(url), Some(key)) = (
+        settings.get("jellyfin_mode").map(String::as_str) == Some("1"),
+        settings.get("jellyfin_url").filter(|s| !s.is_empty()),
+        settings.get("jellyfin_api_key").filter(|s| !s.is_empty()),
+    ) else {
+        return;
+    };
+    let Ok(episodes) = db::episodes::list_by_status(&state.db, "available").await else { return };
+    let pending: Vec<(i64, String)> = episodes
+        .into_iter()
+        .filter(|e| e.watched_at.is_none())
+        .filter_map(|e| e.jellyfin_item_id.map(|item| (e.id, item)))
+        .collect();
+    if pending.is_empty() {
+        return;
+    }
+    let users: Vec<String> = match settings.get("jellyfin_user_id").filter(|s| !s.is_empty()) {
+        Some(user) => vec![user.clone()],
+        None => match jellyfin::list_users(&state.http, url, key).await {
+            Ok(users) => users.into_iter().map(|u| u.id).collect(),
+            Err(_) => return,
+        },
+    };
+    let ids: Vec<String> = pending.iter().map(|(_, item)| item.clone()).collect();
+    let mut played = Vec::new();
+    for user in &users {
+        match jellyfin::played_items(&state.http, url, key, user, &ids).await {
+            Ok(p) => played.extend(p),
+            Err(e) => {
+                state.activity.error(tr!("Erro ao ler o que foi assistido no Jellyfin: {e}", "Failed to read watched items from Jellyfin: {e}"));
+                return;
+            }
+        }
+    }
+    for (item, last_played) in played {
+        let Some((episode_id, _)) = pending.iter().find(|(_, i)| *i == item) else { continue };
+        let when = last_played
+            .and_then(|d| chrono::DateTime::parse_from_rfc3339(&d).ok())
+            .map(|d| d.with_timezone(&chrono::Utc))
+            .unwrap_or_else(chrono::Utc::now)
+            .to_rfc3339();
+        let _ = sqlx::query("UPDATE episodes SET watched_at = ? WHERE id = ? AND watched_at IS NULL")
+            .bind(&when)
+            .bind(episode_id)
+            .execute(&state.db)
+            .await;
+    }
+}
+
+/// Watched-state sync and cleanup run more often than searches, so "delete 30 minutes
+/// after watching" holds regardless of the search interval.
+pub fn spawn_watched_cleanup_loop(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(WATCHED_CHECK_EVERY).await;
+            let state = app.state::<AppState>();
+            sync_jellyfin_watched(&state).await;
+            cleanup_once(&state, currently_open_media(&app)).await;
+        }
+    });
+}
+
 pub async fn cleanup_once(state: &AppState, playing_path: Option<String>) {
     if let Ok(mut available) = db::episodes::list_available(&state.db).await {
         reconcile_missing_files(state, &mut available).await;
@@ -871,11 +1063,6 @@ pub async fn cleanup_once(state: &AppState, playing_path: Option<String>) {
         .get("default_delete_after_days")
         .and_then(|v| v.parse().ok());
     let delete_after_watched = settings.get("delete_after_watched").map(String::as_str) == Some("1");
-    let watched_grace_hours: i64 = settings
-        .get("delete_after_watched_hours")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(24)
-        .max(0);
     let jellyfin_mode = settings.get("jellyfin_mode").map(String::as_str) == Some("1");
     let jellyfin_url = settings.get("jellyfin_url").filter(|s| !s.is_empty());
     let jellyfin_api_key = settings.get("jellyfin_api_key").filter(|s| !s.is_empty());
@@ -895,7 +1082,6 @@ pub async fn cleanup_once(state: &AppState, playing_path: Option<String>) {
     };
 
     for ep in available {
-        // Tocando agora, pelo arquivo ou pelo stream local.
         if playing_path.is_some() && ep.item_path == playing_path
             || playing_path.as_deref().and_then(crate::stream_server::episode_of_url) == Some(ep.id)
         {
@@ -905,16 +1091,15 @@ pub async fn cleanup_once(state: &AppState, playing_path: Option<String>) {
             continue;
         };
 
-        // <= 0 não é retenção válida (apagaria no ciclo seguinte à
-        // disponibilidade) — trata igual a "sem retenção configurada".
         let retention = watch.delete_after_days.or(global_default).filter(|d| *d > 0);
         let expired_days = match (retention, parse(ep.available_at.as_deref())) {
             (Some(days), Some(available_at)) if (now - available_at).num_days() >= days => Some(days),
             _ => None,
         };
-        // Streaming: apaga assim que assistido, independente da Config.
         let watched_long_ago = parse(ep.watched_at.as_deref()).is_some_and(|watched_at| {
-            watch.streaming || (delete_after_watched && (now - watched_at).num_hours() >= watched_grace_hours)
+            watch.streaming
+                || (watch.delete_after_watched.unwrap_or(delete_after_watched)
+                    && now - watched_at >= WATCHED_DELETE_DELAY)
         });
         if expired_days.is_none() && !watched_long_ago {
             continue;
@@ -923,7 +1108,6 @@ pub async fn cleanup_once(state: &AppState, playing_path: Option<String>) {
         let title = ep.name.clone().unwrap_or_else(|| tr!("episódio #{}", "episode #{}", ep.id));
         let clean_title = notify_episode_title(&watch.title, &title);
         if remove_episode(state, &ep, &clean_title, jellyfin).await {
-            // Log interno só (aba de atividade) — sem notificação, de propósito.
             match expired_days {
                 Some(days) => state.activity.info(tr!("Removido por retenção ({days}d): {clean_title}", "Removed by retention ({days}d): {clean_title}")),
                 None => state.activity.info(tr!("Removido depois de assistido: {clean_title}", "Removed after watching: {clean_title}")),
@@ -932,10 +1116,6 @@ pub async fn cleanup_once(state: &AppState, playing_path: Option<String>) {
     }
 }
 
-/// Anime em modo Streaming: apaga todo episódio já assistido (baixando ou
-/// baixado) — o que parou no meio e o próximo pré-baixado ficam. Roda ao
-/// abrir/fechar o player e na limpeza periódica. `playing`: fonte aberta no
-/// player agora (arquivo ou URL do stream), nunca apagada.
 pub async fn cleanup_watched_streams(state: &AppState, playing: Option<&str>) {
     let playing_episode = playing.and_then(crate::stream_server::episode_of_url);
     let mut candidates = Vec::new();
@@ -964,20 +1144,9 @@ pub async fn cleanup_watched_streams(state: &AppState, playing: Option<&str>) {
     }
 }
 
-/// Roda 1x no boot: preenche placeholder ("pending") pra todo episódio da
-/// temporada (1..=`episodes`) que ainda não tem linha — cobre watch criado
-/// ANTES dessa feature existir e o intervalo escolhido (antes só o trecho
-/// escolhido virava linha, e o resto sumia da Biblioteca — agora aparece
-/// como "Não baixado"; o poller continua só buscando dentro do intervalo).
-/// `create_placeholder` é idempotente (INSERT OR IGNORE por
-/// watch_id+episode_number), não mexe em episódio que já tem release.
 pub async fn backfill_placeholder_episodes(app: AppHandle) {
     let state = app.state::<AppState>();
 
-    // Numera episódio real de ANTES da migração 0008 primeiro — sem isso o
-    // passo abaixo não reconhece a linha como "já existe" e cria um pending
-    // duplicado por cima (bug real, pego ainda em dev antes de afetar
-    // ninguém: watch de 16 episódios virou 30 linhas na 1ª versão disso).
     if let Ok(unnumbered) = db::episodes::list_missing_episode_number(&state.db).await {
         for ep in unnumbered {
             if let Some(n) = ep.name.as_deref().and_then(nyaa::extract_episode_number) {
@@ -999,9 +1168,6 @@ pub async fn backfill_placeholder_episodes(app: AppHandle) {
     }
 }
 
-/// Roda 1x no boot: descobre o anime (franquia na AniList) das temporadas
-/// que ainda não têm — cobre as adicionadas antes do agrupamento por
-/// franquia existir. Só atualiza banco; não move pasta nem arquivo.
 pub async fn backfill_series(app: AppHandle) {
     let state = app.state::<AppState>();
     let Ok(watches) = db::watches::list(&state.db).await else {
@@ -1024,9 +1190,6 @@ pub async fn poll_watch_by_id(app: &AppHandle, watch_id: i64) {
     }
 }
 
-/// Arquivo aberto no player nativo AGORA (tocando/pausado/carregando) —
-/// `NowPlaying.source` sozinho continua com o último arquivo mesmo depois
-/// do player parar, e travaria a limpeza desse episódio pra sempre.
 fn currently_open_media(app: &AppHandle) -> Option<String> {
     use crate::player::ffi::VlcState;
     let player = app.state::<crate::player::PlayerState>();
@@ -1047,6 +1210,7 @@ pub fn spawn_background_loop(app: AppHandle) {
                 let playing = currently_open_media(&app);
                 cleanup_once(&state, playing.clone()).await;
                 crate::postprocess::spawn_pending(&app, playing);
+                crate::reminders::run_once(&app, &state).await;
             }
 
             let interval_minutes: u64 = {
@@ -1070,8 +1234,6 @@ mod tests {
 
     #[test]
     fn notify_episode_title_strips_release_junk() {
-        // Caso real que quebrava a janela de notificação (nome cru todo
-        // socado num espaço de ~340px sem quebra de linha adequada).
         assert_eq!(
             notify_episode_title(
                 "Re:ZERO -Starting Life in Another World- Season 4",

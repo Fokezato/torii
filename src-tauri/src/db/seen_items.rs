@@ -1,6 +1,15 @@
 use sqlx::SqlitePool;
 use std::collections::HashSet;
 
+/// Rejected releases are evaluated again (after the anime's filters change).
+pub async fn forget_rejected(pool: &SqlitePool, watch_id: i64) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM seen_items WHERE watch_id = ? AND matched = 0")
+        .bind(watch_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 pub async fn get_seen_ids(pool: &SqlitePool, watch_id: i64) -> Result<HashSet<String>, sqlx::Error> {
     let rows: Vec<(String,)> =
         sqlx::query_as("SELECT source_item_id FROM seen_items WHERE watch_id = ?")

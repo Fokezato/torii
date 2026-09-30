@@ -13,12 +13,9 @@ pub struct EpisodeSource {
     pub leechers: Option<i64>,
     pub size: Option<String>,
     pub is_active: i64,
+    pub file_index: Option<i64>,
 }
 
-/// Grava o release escolhido (`primary`, já marcado ativo) e os outros que
-/// também casaram com o mesmo episódio (`alternates`), pra "trocar fonte"
-/// não precisar buscar no Nyaa de novo. `INSERT OR IGNORE` porque re-poll
-/// pode ver o mesmo candidato de novo (protegido pelo índice único).
 pub async fn add_many(
     pool: &SqlitePool,
     episode_id: i64,
@@ -33,9 +30,6 @@ pub async fn add_many(
     Ok(())
 }
 
-/// Candidatos achados depois que o episódio já começou a baixar: entram
-/// como alternativas (não ativas) pra "trocar fonte" e pro detector de
-/// download travado poderem usar.
 pub async fn add_alternates(
     pool: &SqlitePool,
     episode_id: i64,
@@ -71,6 +65,22 @@ async fn insert_one(
     .bind(now)
     .execute(pool)
     .await?;
+    Ok(())
+}
+
+pub async fn add_pack_source(
+    pool: &SqlitePool,
+    episode_id: i64,
+    candidate: &NyaaCandidate,
+    file_index: i64,
+) -> Result<(), sqlx::Error> {
+    insert_one(pool, episode_id, candidate, false, &chrono::Utc::now().to_rfc3339()).await?;
+    sqlx::query("UPDATE episode_sources SET file_index = ? WHERE episode_id = ? AND source_item_id = ?")
+        .bind(file_index)
+        .bind(episode_id)
+        .bind(&candidate.id)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 

@@ -18,19 +18,14 @@ pub struct Episode {
     pub available_at: Option<String>,
     pub deleted_at: Option<String>,
     pub episode_number: Option<i64>,
-    /// Onde o player parou da última vez (ms).
     pub watch_position_ms: Option<i64>,
-    /// Quando chegou no encerramento (ou 90%) pela 1ª vez — "assistido".
     pub watched_at: Option<String>,
-    /// Quando passou pelo "remover áudios extras" (ver `audio_strip`).
     pub audio_processed_at: Option<String>,
-    /// Quando passou pelo "reduzir resolução" (ver `downscale`).
     pub video_processed_at: Option<String>,
-    /// Última vez que o player salvou progresso (ordena o "Continuar assistindo").
     pub watch_progress_at: Option<String>,
-    /// MKV conferido/corrigido do CRC32 no índice (ver `mkv_fix`).
     #[sqlx(default)]
     pub container_fixed_at: Option<String>,
+    pub file_index: Option<i64>,
 }
 
 pub struct NewEpisode<'a> {
@@ -40,22 +35,9 @@ pub struct NewEpisode<'a> {
     pub magnet_uri: &'a str,
     pub save_path: &'a str,
     pub status: &'a str,
-    /// Número extraído do título ("SxxEyy"). Ver migração 0008: força 1 linha
-    /// por (watch, episódio) mesmo quando 2 releases diferentes casam em
-    /// polls separados — sem isso, source_item_id sozinho não pega esse caso
-    /// e o mesmo episódio duplicava de novo (bug real reportado 2x).
     pub episode_number: Option<i64>,
 }
 
-/// Idempotente por design, protegido por 2 índices únicos: (watch_id,
-/// source_item_id) da migração 0006 — a MESMA release não entra 2x — e
-/// (watch_id, episode_number) da 0008 — releases DIFERENTES do MESMO
-/// episódio (ex. poll 1 escolhe ToonsHub, poll 2 escolhe VARYG) também não
-/// duplicam. `INSERT OR IGNORE` só ignora o conflito; sempre devolve a linha
-/// que existe agora, nova ou não. Quem chama confere `status`: "found" =
-/// inserção de verdade, dispara download; "error" = já existia mas a
-/// tentativa anterior falhou, quem chama deve trocar a fonte (replace) em
-/// vez de tratar como duplicata.
 pub async fn add(pool: &SqlitePool, e: NewEpisode<'_>) -> Result<Episode, sqlx::Error> {
     let now = chrono::Utc::now().to_rfc3339();
     sqlx::query(
@@ -73,13 +55,6 @@ pub async fn add(pool: &SqlitePool, e: NewEpisode<'_>) -> Result<Episode, sqlx::
     .execute(pool)
     .await?;
 
-    // Tenta pelo episode_number primeiro (cobre o caso comum). Mas o INSERT
-    // pode ter sido ignorado por conflito no OUTRO índice único, o de
-    // source_item_id (migração 0006) — contra uma linha pré-existente de
-    // ANTES da 0008, que sempre tem episode_number NULL. Aí a busca por
-    // episode_number não acha nada, e sem esse fallback isso virava
-    // `fetch_one` vazio = erro, episódio inteiro silenciosamente descartado
-    // do lote (bug real: Re:ZERO S3 sumia episódio sem nem logar).
     if let Some(episode_number) = e.episode_number {
         if let Some(row) = sqlx::query_as::<_, Episode>(
             "SELECT * FROM episodes WHERE watch_id = ? AND episode_number = ?",
@@ -100,13 +75,6 @@ pub async fn add(pool: &SqlitePool, e: NewEpisode<'_>) -> Result<Episode, sqlx::
         .await
 }
 
-/// Linha "placeholder" criada ao adicionar o anime na biblioteca, antes de
-/// qualquer busca no Nyaa — o episódio já aparece na Biblioteca (status
-/// "pending") em vez de só surgir quando (e se) o poller achar um torrent
-/// pra ele. Resolve o bug recorrente de episódio "sumir" da Biblioteca: a
-/// linha sempre existe, só o status muda enquanto o motor procura/baixa.
-/// `INSERT OR IGNORE` pelo índice único (watch_id, episode_number) — chamar
-/// de novo (ex. usuário recriando o watch) não duplica.
 pub async fn create_placeholder(
     pool: &SqlitePool,
     watch_id: i64,
@@ -127,16 +95,6 @@ pub async fn create_placeholder(
     Ok(())
 }
 
-/// Episódio real criado ANTES da migração 0008 nunca teve `episode_number`
-/// gravado (coluna só passou a existir depois). Sem numerar essas linhas
-/// antigas, `create_placeholder` não as reconhece como "esse episódio já
-/// existe" e cria um "pending" duplicado por cima (bug real: virou 30 linhas
-/// pra um watch de 16 episódios na primeira vez que rodou o backfill).
-/// Exclui "deleted": episódio real deletado DEPOIS da 0008 já nasce
-/// numerado (o fluxo normal seta `episode_number` na criação, bem antes de
-/// qualquer deleção) — só sobra aqui lixo de ANTES dessa feature (era da
-/// duplicata), e numerar esse lixo travaria o slot pra sempre sem nenhuma
-/// linha visível ocupando ele (outro jeito do episódio "sumir").
 pub async fn list_missing_episode_number(pool: &SqlitePool) -> Result<Vec<Episode>, sqlx::Error> {
     sqlx::query_as::<_, Episode>(
         "SELECT * FROM episodes WHERE episode_number IS NULL AND name IS NOT NULL AND status != 'deleted'",
@@ -154,11 +112,6 @@ pub async fn set_episode_number(pool: &SqlitePool, id: i64, episode_number: i64)
     Ok(())
 }
 
-/// Volta um episódio pro estado "pending" (não apaga a linha — ela é o
-/// placeholder permanente do episódio na Biblioteca). Usado quando o
-/// usuário cancela um download incompleto (botão X no Downloads): diferente
-/// de `mark_deleted` (retenção — de propósito terminal, não deve ressurgir),
-/// cancelar um download deve deixar o episódio "procurável" de novo.
 pub async fn mark_pending(pool: &SqlitePool, id: i64) -> Result<(), sqlx::Error> {
     sqlx::query(
         "UPDATE episodes SET status = 'pending', source_item_id = NULL, name = NULL, \
@@ -172,10 +125,6 @@ pub async fn mark_pending(pool: &SqlitePool, id: i64) -> Result<(), sqlx::Error>
     Ok(())
 }
 
-/// Lista da tela de Downloads: o que está na fila/baixando sempre (antes
-/// entrava só pela data de criação, e um episódio baixado de novo — que
-/// mantém a data antiga — não aparecia), depois erros e prontos recentes.
-/// Placeholders "procurando" e removidos ficam de fora.
 pub async fn list_recent(pool: &SqlitePool, limit: i64) -> Result<Vec<Episode>, sqlx::Error> {
     sqlx::query_as::<_, Episode>(
         "SELECT * FROM episodes WHERE status IN ('found', 'downloading', 'error', 'available') \
@@ -188,7 +137,6 @@ pub async fn list_recent(pool: &SqlitePool, limit: i64) -> Result<Vec<Episode>, 
         .await
 }
 
-/// Todos os episódios prontos pra assistir (base do "Continuar assistindo").
 pub async fn list_available(pool: &SqlitePool) -> Result<Vec<Episode>, sqlx::Error> {
     sqlx::query_as::<_, Episode>("SELECT * FROM episodes WHERE status = 'available'")
         .fetch_all(pool)
@@ -243,11 +191,15 @@ pub async fn mark_downloading(pool: &SqlitePool, id: i64, info_hash: &str) -> Re
     Ok(())
 }
 
-/// Idempotente de propósito: o reconciler chama isso a cada tick enquanto o
-/// torrent seguir rastreado (não paramos de rastrear ao terminar, pra
-/// "remover" continuar funcionando depois), então `available_at` só deve
-/// ser setado na PRIMEIRA vez, não reatualizado a cada 2s.
-/// Fonte achada, esperando ser aberta no player (anime em modo Streaming).
+pub async fn set_file_index(pool: &SqlitePool, id: i64, file_index: Option<i64>) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE episodes SET file_index = ? WHERE id = ?")
+        .bind(file_index)
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 pub async fn mark_ready(pool: &SqlitePool, id: i64) -> Result<(), sqlx::Error> {
     sqlx::query("UPDATE episodes SET status = 'ready', info_hash = NULL, error_message = NULL WHERE id = ?")
         .bind(id)
@@ -277,10 +229,6 @@ pub async fn mark_error(pool: &SqlitePool, id: i64, message: &str) -> Result<(),
     Ok(())
 }
 
-/// Troca a fonte de um episódio já rastreado (menu "..." > Trocar fonte na
-/// Biblioteca). Volta pro estado "found" do zero — quem chama ainda precisa
-/// cancelar o torrent/arquivo antigo (`TorrentEngine::remove`) e iniciar o
-/// novo download (`engine::start_download`) separadamente.
 pub async fn switch_source(
     pool: &SqlitePool,
     id: i64,
@@ -291,7 +239,7 @@ pub async fn switch_source(
     sqlx::query(
         "UPDATE episodes SET source_item_id = ?, name = ?, magnet_uri = ?, status = 'found', \
          info_hash = NULL, item_path = NULL, jellyfin_item_id = NULL, error_message = NULL, \
-         available_at = NULL, deleted_at = NULL \
+         available_at = NULL, deleted_at = NULL, file_index = NULL \
          WHERE id = ?",
     )
     .bind(source_item_id)
@@ -303,8 +251,6 @@ pub async fn switch_source(
     Ok(())
 }
 
-/// Progresso do player. `watched` só MARCA (nunca desmarca): voltar pro
-/// começo de um episódio já assistido não cancela a limpeza agendada.
 pub async fn save_progress(
     pool: &SqlitePool,
     watch_id: i64,
@@ -329,8 +275,6 @@ pub async fn save_progress(
     Ok(())
 }
 
-/// Prontos com arquivo e com alguma etapa do pós-processamento ainda não
-/// feita (ver `postprocess`) — quem chama decide qual se aplica.
 pub async fn list_postprocess_pending(pool: &SqlitePool) -> Result<Vec<Episode>, sqlx::Error> {
     sqlx::query_as::<_, Episode>(
         "SELECT * FROM episodes WHERE status = 'available' AND item_path IS NOT NULL \
@@ -340,7 +284,6 @@ pub async fn list_postprocess_pending(pool: &SqlitePool) -> Result<Vec<Episode>,
     .await
 }
 
-/// MKV prontos ainda não conferidos pelo `mkv_fix`.
 pub async fn list_container_pending(pool: &SqlitePool) -> Result<Vec<Episode>, sqlx::Error> {
     sqlx::query_as::<_, Episode>(
         "SELECT * FROM episodes WHERE status = 'available' AND item_path IS NOT NULL \

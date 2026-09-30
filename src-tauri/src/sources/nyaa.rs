@@ -3,17 +3,11 @@ use regex::Regex;
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::sync::LazyLock;
 
 const BASE_URL: &str = "https://nyaa.si";
-/// Categoria 1_2 = "Anime - English-translated", onde ficam os releases fansub/CR com áudio/legenda multi-idioma.
 const CATEGORY: &str = "1_2";
 const DETAIL_FETCH_CONCURRENCY: usize = 3;
-/// Pra títulos populares com muito reupload (ex. Mushoku Tensei), a busca do
-/// nyaa por nome+season sozinha estoura a página 1 (~75 itens) sem cobrir
-/// episódios mais antigos da season — o ranking dele não é confiável pra
-/// esse caso. Busca "<query> S0NE0M" por episódio é cirúrgica (achou exato
-/// com poucos itens em teste manual), então sonda um range de episódios e
-/// mescla com a busca ampla. 24 cobre a esmagadora maioria das seasons.
 const EPISODE_PROBE_MAX: u32 = 24;
 const EPISODE_PROBE_CONCURRENCY: usize = 5;
 
@@ -32,12 +26,20 @@ pub struct NyaaCandidate {
 pub struct MatchResult {
     pub matched: Vec<EpisodeMatch>,
     pub all_new: Vec<NyaaCandidate>,
+    /// Releases without an episode number (season packs) that passed every filter.
+    pub batches: Vec<NyaaCandidate>,
+    pub rejected: Rejections,
 }
 
-/// Um episódio com 2+ releases casando vira 1 `EpisodeMatch`: `primary` (mais
-/// seeders — não repack/grupo específico, só a fonte mais saudável pra
-/// baixar) e `alternates` (o resto, guardado em `episode_sources` pro
-/// usuário trocar manualmente depois via menu "..." na Biblioteca).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Rejections {
+    pub quality: usize,
+    pub season: usize,
+    pub range: usize,
+    pub other_work: usize,
+    pub language: usize,
+}
+
 pub struct EpisodeMatch {
     pub primary: NyaaCandidate,
     pub alternates: Vec<NyaaCandidate>,
@@ -117,21 +119,18 @@ fn parse_rss(text: &str) -> Result<Vec<NyaaCandidate>, String> {
         .collect())
 }
 
-/// O nyaa trata hífen colado numa palavra (início: "-palavra" vira operador
-/// de exclusão tipo Google; fim: "palavra-" quebra o casamento de token) de
-/// forma especial nos dois casos — testado contra a API de verdade. Títulos
-/// estilizados tipo "Re:ZERO -Starting Life in Another World- Season 4" têm
-/// hífen decorativo exatamente nessas posições e a busca não achava nada,
-/// mesmo o torrent existindo (https://nyaa.si/view/2095563). Mais simples
-/// trocar todo hífen por espaço na query — não precisa ser bonito, só achar.
 fn sanitize_query(query: &str) -> String {
     query.replace('-', " ")
 }
 
 pub async fn search(client: &reqwest::Client, query: &str) -> Result<Vec<NyaaCandidate>, String> {
+    search_in(client, query, CATEGORY).await
+}
+
+async fn search_in(client: &reqwest::Client, query: &str, category: &str) -> Result<Vec<NyaaCandidate>, String> {
     let query = sanitize_query(query);
     let url = format!(
-        "{BASE_URL}/?page=rss&c={CATEGORY}&q={}",
+        "{BASE_URL}/?page=rss&c={category}&q={}",
         urlencoding::encode(&query)
     );
     let text = client
@@ -145,9 +144,6 @@ pub async fn search(client: &reqwest::Client, query: &str) -> Result<Vec<NyaaCan
     parse_rss(&text)
 }
 
-/// Sem range configurado, sonda 1..=EPISODE_PROBE_MAX (cobre a esmagadora
-/// maioria das seasons). Com range, sonda só o que interessa — mais rápido
-/// e evita trazer de volta episódios fora do que o usuário pediu.
 fn episode_probe_queries(base_query: &str, season: u32, start: Option<i64>, end: Option<i64>) -> Vec<String> {
     let lo = start.unwrap_or(1).max(1) as u32;
     let hi = end.unwrap_or(EPISODE_PROBE_MAX as i64).clamp(1, EPISODE_PROBE_MAX as i64) as u32;
@@ -157,8 +153,6 @@ fn episode_probe_queries(base_query: &str, season: u32, start: Option<i64>, end:
     (lo..=hi).map(|ep| format!("{base_query} S{season:02}E{ep:02}")).collect()
 }
 
-/// Busca "<query> S0NE01", "...E02", etc. em paralelo e mescla com `base`,
-/// removendo duplicata por id. Ver comentário de `EPISODE_PROBE_MAX`.
 async fn search_with_episode_probes(
     client: &reqwest::Client,
     base_query: &str,
@@ -190,10 +184,6 @@ async fn search_with_episode_probes(
     merged
 }
 
-/// O nyaa faz busca tipo AND por palavra: pedir "Season 3" literal exclui
-/// releases que abreviam como "S03E10" (sem a palavra "Season" no título).
-/// Tira o sufixo de season da query pra buscar mais amplo, devolvendo o
-/// número pra filtrar depois via `title_matches_season`.
 pub fn split_season(query: &str) -> (String, Option<u32>) {
     let re =
         Regex::new(r"(?i)\s*(?:season\s*(\d+)|(\d+)(?:st|nd|rd|th)\s*season)\s*$").unwrap();
@@ -210,23 +200,108 @@ pub fn split_season(query: &str) -> (String, Option<u32>) {
     }
 }
 
-/// Casa "S03", "S3", "S03E10" ou "Season 3" no título do candidato. Sem
-/// isso, buscar com a query ampliada (via `split_season`) traria de volta
-/// releases de outras seasons do mesmo anime.
 fn title_matches_season(title: &str, season: u32) -> bool {
     let pattern = format!(r"(?i)\bs0*{season}(?:e\d+)?\b|\bseason\s*0*{season}\b");
     Regex::new(&pattern).map(|r| r.is_match(title)).unwrap_or(true)
 }
 
+static SXXEYY: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)S(\d{1,2})E(\d{1,3})").unwrap());
+// "Show - 05 [1080p]", "Show - 12v2 (WEB)", "Show - 05.mkv"
+static DASH_EPISODE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\s-\s(\d{1,4})(?:v\d+)?(?:\s*[\[(]|\s*\.[a-z0-9]{2,4}$|\s*$)").unwrap()
+});
+static EP_EPISODE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\bEP?\.?\s?(\d{2,3})\b").unwrap());
+
 pub fn extract_episode_number(title: &str) -> Option<u32> {
-    let re = Regex::new(r"(?i)S\d{1,2}E(\d{1,3})").ok()?;
-    re.captures(title)?.get(1)?.as_str().parse().ok()
+    [&*SXXEYY, &*DASH_EPISODE, &*EP_EPISODE].iter().find_map(|re| {
+        let caps = re.captures(title)?;
+        caps.get(caps.len() - 1)?.as_str().parse().ok()
+    })
 }
 
-/// Filtro "avançado" de range de episódio (ex. baixar só do 5 ao 10). Sem
-/// range configurado (ambos None) sempre casa. Título sem "SxxEyy"
-/// reconhecível também deixa passar — os outros filtros (season/qualidade/
-/// idioma) continuam se aplicando de qualquer forma.
+pub fn extract_season_number(title: &str) -> Option<u32> {
+    SXXEYY.captures(title)?.get(1)?.as_str().parse().ok()
+}
+
+fn normalize_words(text: &str) -> String {
+    static LEADING_TAGS: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^\s*(?:\[[^\]]*\]\s*|\([^)]*\)\s*)+").unwrap());
+    let text = LEADING_TAGS.replace(text, "");
+    let mapped: String = text
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { ' ' })
+        .collect();
+    mapped.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// A release of another work in the same franchise: "Steins;Gate 0", "... The Movie",
+/// "... OVA", or another season. `names` are the anime's own titles; without a match
+/// nothing is rejected.
+pub fn is_other_work(title: &str, names: &[String], season: u32) -> bool {
+    const MARKERS: [&str; 10] = ["movie", "film", "gekijouban", "ova", "ovas", "oad", "special", "specials", "zero", "recap"];
+    static SEASON_TOKEN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^s(\d{1,2})$").unwrap());
+    static ORDINAL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\d{1,2})(?:st|nd|rd|th)$").unwrap());
+    let norm = normalize_words(title);
+    for name in names {
+        let name = normalize_words(name);
+        if name.is_empty() {
+            continue;
+        }
+        let Some(pos) = norm.match_indices(&name).map(|(i, _)| i).find(|&i| {
+            let end = i + name.len();
+            (i == 0 || norm.as_bytes()[i - 1] == b' ') && (end == norm.len() || norm.as_bytes()[end] == b' ')
+        }) else {
+            continue;
+        };
+        let rest: Vec<&str> = norm[pos + name.len()..].split_whitespace().take(2).collect();
+        let (t0, t1) = (rest.first().copied().unwrap_or(""), rest.get(1).copied().unwrap_or(""));
+        let other_season = |n: &str| n.parse::<u32>().is_ok_and(|n| n != season);
+        let before = norm[..pos].split_whitespace().last().unwrap_or("");
+        return MARKERS.contains(&t0)
+            || (t0 == "the" && MARKERS.contains(&t1))
+            || ["gekijouban", "movie", "film"].contains(&before)
+            || (t0.len() == 1 && other_season(t0))
+            || (t0 == "season" && other_season(t1))
+            || SEASON_TOKEN.captures(t0).is_some_and(|c| other_season(&c[1]))
+            || (t1 == "season" && ORDINAL.captures(t0).is_some_and(|c| other_season(&c[1])));
+    }
+    false
+}
+
+const VIDEO_EXTENSIONS: [&str; 6] = ["mkv", "mp4", "avi", "webm", "m4v", "ts"];
+
+/// Episode number of a file inside a season pack, or `None` for extras, other
+/// seasons/works and non-video files.
+pub fn pack_file_episode(path: &str, names: &[String], season: u32) -> Option<u32> {
+    static EXTRA_DIR: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)\b(?:extras?|specials?|bonus|ova|oad|nc ?op|nc ?ed|creditless|menus?|pv|previews?|trailers?|scans|fonts)\b").unwrap()
+    });
+    static LEADING_NUMBER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\d{1,3})(?:v\d+)?(?:[\s._-]|$)").unwrap());
+    let components: Vec<&str> = path.split(['/', '\\']).collect();
+    let file = components.last()?;
+    let (stem, ext) = file.rsplit_once('.')?;
+    if !VIDEO_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str()) {
+        return None;
+    }
+    // The pack's root folder often reads like "Show (S1 + OVA + Movie)": folders named
+    // after the anime are not treated as extras.
+    let named_after_anime = |dir: &str| {
+        let dir = normalize_words(dir);
+        names.iter().map(|n| normalize_words(n)).any(|n| !n.is_empty() && dir.contains(&n))
+    };
+    let extra_dir = components[..components.len() - 1]
+        .iter()
+        .any(|dir| !named_after_anime(dir) && EXTRA_DIR.is_match(dir));
+    if extra_dir || EXTRA_DIR.is_match(stem) {
+        return None;
+    }
+    if extract_season_number(stem).is_some_and(|s| s != season) || is_other_work(stem, names, season) {
+        return None;
+    }
+    extract_episode_number(file)
+        .or_else(|| LEADING_NUMBER.captures(stem).and_then(|c| c[1].parse().ok()))
+}
+
 fn title_matches_episode_range(title: &str, start: Option<i64>, end: Option<i64>) -> bool {
     if start.is_none() && end.is_none() {
         return true;
@@ -238,7 +313,6 @@ fn title_matches_episode_range(title: &str, start: Option<i64>, end: Option<i64>
     start.map_or(true, |s| ep >= s) && end.map_or(true, |e| ep <= e)
 }
 
-/// "any"/vazio sempre casa. 2160p também aceita a tag "4k", comum em releases.
 pub fn matches_quality(title: &str, quality: &str) -> bool {
     if quality.is_empty() || quality.eq_ignore_ascii_case("any") {
         return true;
@@ -262,12 +336,6 @@ async fn fetch_detail(client: &reqwest::Client, view_url: &str) -> Result<(Strin
         .map_err(|e| e.to_string())?;
     let doc = Html::parse_document(&html);
 
-    // Uploaders variam: alguns (ex. ToonsHub) mandam markdown cru num único
-    // text node (`&#10;` vira quebra de linha real ao decodificar entidades);
-    // outros renderizam <li>/<p> de verdade, o que fragmenta label e valor em
-    // text nodes separados (<strong>Audio:</strong> vira um node, o valor
-    // depois vira outro). Junta por li/p quando eles existem; senão cai pro
-    // texto bruto do container, que já preserva as linhas via \n decodificado.
     let desc_sel = Selector::parse("#torrent-description").unwrap();
     let line_sel = Selector::parse("#torrent-description li, #torrent-description p").unwrap();
     let lines: Vec<String> = doc
@@ -294,16 +362,6 @@ async fn fetch_detail(client: &reqwest::Client, view_url: &str) -> Result<(Strin
 }
 
 fn extract_language_line(description: &str, label_pattern: &str) -> Option<String> {
-    // "(?:[-*]\s+)?" tolera o bullet markdown ("- " ou "* ") que antecede o
-    // label em listas cruas tipo "- **Audio:** Japanese, ...". Uploaders no
-    // estilo MediaInfo (VARYG, EMBER) envolvem o label em backtick em vez de
-    // negrito e adicionam a contagem entre parênteses antes do ":"
-    // ("`Subtitles (15):`", "`Audios (2):`") — "s?\s*(?:\(\d+\))?" cobre o
-    // plural + contagem, e a classe de caractere aceita "`" além de "*".
-    //
-    // Só espaço/tab entre o label e o valor: `\s` atravessava a quebra de
-    // linha e, no formato em bloco (título sozinho e uma faixa por linha,
-    // comum em releases estilo MediaInfo), pegava só a 1ª faixa da lista.
     let re = Regex::new(&format!(
         r"(?im)^(?:[-*][ \t]+)?[`*]{{0,2}}{label_pattern}s?[ \t]*(?:\(\d+\))?[`*]{{0,2}}:?[ \t]*(.*)$"
     ))
@@ -313,8 +371,6 @@ fn extract_language_line(description: &str, label_pattern: &str) -> Option<Strin
     let value = if !inline.is_empty() {
         inline.to_string()
     } else {
-        // Formato em bloco: "**Subtitles**" e as faixas nas linhas de baixo,
-        // até a próxima linha em branco ou o próximo título.
         let rest = &description[caps.get(0)?.end()..];
         rest.lines()
             .skip_while(|l| l.trim().is_empty())
@@ -328,19 +384,9 @@ fn extract_language_line(description: &str, label_pattern: &str) -> Option<Strin
     if value.is_empty() {
         return None;
     }
-    // Cada idioma da lista também costuma vir em negrito ("**Portuguese**
-    // (Brazilian), ASS") — sem tirar os "**" daqui, o "**" entre o nome e o
-    // "(Brazilian)" quebra o match de substring contra "portuguese (brazil)"
-    // em `matches_language_text`, mesmo o idioma estando ali de verdade.
     Some(value.replace('*', ""))
 }
 
-/// Uploaders no estilo MediaInfo (VARYG, EMBER, etc.) descrevem o idioma com
-/// o adjetivo do país em vez do rótulo canônico que a UI usa — "Portuguese
-/// (Brazilian)" em vez de "Portuguese (Brazil)", "Spanish (European)" em vez
-/// de "Spanish (Spain)". O idioma existe de verdade no release, só o texto
-/// não bate por substring direto. Cobre as variantes reais vistas até agora;
-/// substring simples continua sendo o caminho principal.
 const LANGUAGE_ALIASES: &[(&str, &[&str])] = &[
     ("Portuguese (Brazil)", &["portuguese (brazilian)"]),
     ("Spanish (Latin America)", &["spanish (latin american)"]),
@@ -359,7 +405,86 @@ fn language_matches(line_lower: &str, canonical: &str) -> bool {
         .is_some_and(|(_, aliases)| aliases.iter().any(|a| line_lower.contains(a)))
 }
 
-/// Best-effort: casa contra o texto livre da descrição (convenção do uploader), igual o app antigo em Python.
+/// (language, search tag, lowercase markers in release titles). Releases in other
+/// languages usually state it in the title and sit in the "non-English" category.
+const TITLE_TAGS: &[(&str, &str, &[&str])] = &[
+    ("Portuguese (Brazil)", "PT-BR", &["pt-br", "ptbr", "pt br", "legendado", "dublado", "português"]),
+    ("Spanish (Latin America)", "Latino", &["latino", "esp-lat", "spa-lat", "español latino"]),
+    ("Spanish (Spain)", "Castellano", &["castellano", "esp-es", "español españa"]),
+    ("French", "VOSTFR", &["vostfr", "subfrench", "french"]),
+    ("German", "German", &["german", "gersub", "deutsch"]),
+    ("Italian", "ITA", &["[ita]", "sub ita", "italian"]),
+    ("Russian", "RUS", &["[rus]", "russian"]),
+    ("Arabic", "Arabic", &["arabic"]),
+    ("Chinese (Simplified)", "CHS", &["chs", "简"]),
+    ("Chinese (Traditional)", "CHT", &["cht", "繁"]),
+    ("Polish", "PL", &["polish", "napisy pl"]),
+    ("Indonesian", "Indonesia", &["indonesia", "subindo"]),
+    ("Malay", "Malay", &["malay"]),
+    ("Thai", "Thai", &["thai"]),
+    ("Vietnamese", "Vietsub", &["vietsub", "vietnamese"]),
+];
+const DUB_MARKERS: [&str; 6] = ["dub", "dublado", "dual", "doblaje", "multi-audio", "multi audio"];
+
+fn title_tags(language: &str) -> Option<&'static (&'static str, &'static str, &'static [&'static str])> {
+    TITLE_TAGS.iter().find(|(name, _, _)| *name == language)
+}
+
+fn title_has_language(title_lower: &str, language: &str) -> bool {
+    title_tags(language).is_some_and(|(_, _, markers)| markers.iter().any(|m| title_lower.contains(m)))
+}
+
+/// Extra searches for anime filtered by a non-English language: the non-English
+/// category, and the query with the language tag across all anime.
+fn language_searches(query: &str, audio_langs: &[String], sub_langs: &[String]) -> Vec<(String, &'static str)> {
+    let tags: Vec<&str> = audio_langs
+        .iter()
+        .chain(sub_langs)
+        .filter_map(|l| title_tags(l).map(|(_, tag, _)| *tag))
+        .collect();
+    if tags.is_empty() {
+        return Vec::new();
+    }
+    let mut out = vec![(query.to_string(), "1_3")];
+    for tag in tags {
+        let q = format!("{query} {tag}");
+        if !out.iter().any(|(existing, _)| *existing == q) {
+            out.push((q, "1_0"));
+        }
+    }
+    out
+}
+
+async fn with_language_searches(
+    client: &reqwest::Client,
+    query: &str,
+    audio_langs: &[String],
+    sub_langs: &[String],
+    mut base: Vec<NyaaCandidate>,
+) -> Vec<NyaaCandidate> {
+    let mut seen: HashSet<String> = base.iter().map(|c| c.id.clone()).collect();
+    for (q, category) in language_searches(query, audio_langs, sub_langs) {
+        if let Ok(found) = search_in(client, &q, category).await {
+            base.extend(found.into_iter().filter(|c| seen.insert(c.id.clone())));
+        }
+    }
+    base
+}
+
+/// Language filters satisfied by the release page's description or, failing that,
+/// by tags in the title ("[PT-BR]", "Legendado", "Dublado").
+pub fn matches_language(description: &str, title: &str, audio_langs: &[String], sub_langs: &[String]) -> bool {
+    let title = title.to_lowercase();
+    let dubbed = DUB_MARKERS.iter().any(|m| title.contains(m));
+    let audio_ok = audio_langs.is_empty()
+        || matches_language_text(description, audio_langs, &[])
+        || (dubbed && audio_langs.iter().any(|l| title_has_language(&title, l)));
+    let sub_ok = sub_langs.is_empty()
+        || matches_language_text(description, &[], sub_langs)
+        || sub_langs.iter().any(|l| title_has_language(&title, l));
+    audio_ok && sub_ok
+}
+
 pub fn matches_language_text(description: &str, audio_langs: &[String], sub_langs: &[String]) -> bool {
     let audio_ok = audio_langs.is_empty()
         || extract_language_line(description, "Audio:?")
@@ -380,9 +505,6 @@ pub fn matches_language_text(description: &str, audio_langs: &[String], sub_lang
     audio_ok && sub_ok
 }
 
-/// Mesma lista de idiomas que o frontend oferece (src/lib/constants.ts).
-/// Duplicada aqui de propósito — é só pra saber quais bater contra o texto
-/// livre da descrição, não pra validar entrada do usuário.
 const KNOWN_LANGUAGES: &[&str] = &[
     "Japanese",
     "English",
@@ -403,10 +525,6 @@ const KNOWN_LANGUAGES: &[&str] = &[
     "Vietnamese",
 ];
 
-/// Quantos candidatos checar pra descobrir idioma disponível. Não precisa
-/// ser todo mundo — áudio/legenda disponível não muda de episódio pra
-/// episódio na prática, uma amostra do topo já representa bem, e cada
-/// checagem é uma fetch de página de detalhe (custo real).
 const LANGUAGE_SAMPLE_SIZE: usize = 10;
 
 #[derive(Debug, Serialize)]
@@ -415,11 +533,6 @@ pub struct AvailableLanguages {
     pub subtitles: Vec<String>,
 }
 
-/// Descobre quais dos `KNOWN_LANGUAGES` de fato aparecem nos releases desse
-/// anime no nyaa, checando uma amostra de páginas de detalhe. Existe pra
-/// não deixar o usuário escolher um idioma que nunca vai casar com nada —
-/// ao invés de uma lista genérica de 17 opções, mostra só o que
-/// historicamente tem torrent de verdade.
 pub async fn list_available_languages(client: &reqwest::Client, query: &str) -> Result<AvailableLanguages, String> {
     let (search_query, _season) = split_season(query);
     let all = search(client, &search_query).await?;
@@ -442,8 +555,6 @@ pub async fn list_available_languages(client: &reqwest::Client, query: &str) -> 
     Ok(aggregate_languages(&descriptions))
 }
 
-/// Parte pura de `list_available_languages` (sem rede), separada pra dar
-/// pra testar contra fixture de verdade.
 fn aggregate_languages(descriptions: &[String]) -> AvailableLanguages {
     let mut audio = HashSet::new();
     let mut subtitles = HashSet::new();
@@ -470,13 +581,6 @@ fn aggregate_languages(descriptions: &[String]) -> AvailableLanguages {
     }
 }
 
-/// Só 1 download por número de episódio — sem isso, quando 2+ grupos lançam
-/// release do mesmo episódio (ex. Feibanyama + ToonsHub, comum em títulos
-/// populares) cada um vira um candidato "matched" próprio e baixa duplicado.
-/// Escolhe o de mais seeders como `primary` (fonte mais saudável, não um
-/// grupo específico); o resto vira `alternates`, guardado pro usuário trocar
-/// manualmente depois. Título sem "SxxEyy" reconhecível (ex. batch) não tem
-/// chave de grupo — vira seu próprio `EpisodeMatch` sem alternativas.
 fn group_best_per_episode(candidates: Vec<NyaaCandidate>) -> Vec<EpisodeMatch> {
     let mut groups: Vec<EpisodeMatch> = Vec::new();
     let mut episode_index: HashMap<u32, usize> = HashMap::new();
@@ -508,9 +612,11 @@ fn group_best_per_episode(candidates: Vec<NyaaCandidate>) -> Vec<EpisodeMatch> {
     groups
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn find_new_matches(
     client: &reqwest::Client,
     query: &str,
+    names: &[String],
     quality: &str,
     audio_langs: &[String],
     sub_langs: &[String],
@@ -524,20 +630,32 @@ pub async fn find_new_matches(
         Some(s) => search_with_episode_probes(client, &search_query, s, episode_start, episode_end, all).await,
         None => all,
     };
-    let new_candidates: Vec<NyaaCandidate> = all
-        .into_iter()
-        .filter(|c| matches_quality(&c.title, quality))
-        .filter(|c| season.map_or(true, |s| title_matches_season(&c.title, s)))
-        .filter(|c| title_matches_episode_range(&c.title, episode_start, episode_end))
-        .filter(|c| !seen_ids.contains(&c.id))
-        .collect();
+    let all = with_language_searches(client, &search_query, audio_langs, sub_langs, all).await;
+    let mut rejected = Rejections::default();
+    let mut new_candidates = Vec::new();
+    for c in all.into_iter().filter(|c| !seen_ids.contains(&c.id)) {
+        if !matches_quality(&c.title, quality) {
+            rejected.quality += 1;
+        } else if season.is_some_and(|s| !title_matches_season(&c.title, s)) {
+            rejected.season += 1;
+        } else if !title_matches_episode_range(&c.title, episode_start, episode_end) {
+            rejected.range += 1;
+        } else if is_other_work(&c.title, names, season.unwrap_or(1)) {
+            rejected.other_work += 1;
+        } else {
+            new_candidates.push(c);
+        }
+    }
+
+    let finish = |passed: Vec<NyaaCandidate>, all_new: Vec<NyaaCandidate>, rejected: Rejections| {
+        let (numbered, batches): (Vec<_>, Vec<_>) =
+            passed.into_iter().partition(|c| extract_episode_number(&c.title).is_some());
+        MatchResult { matched: group_best_per_episode(numbered), all_new, batches, rejected }
+    };
 
     let need_lang_check = !audio_langs.is_empty() || !sub_langs.is_empty();
     if !need_lang_check {
-        return Ok(MatchResult {
-            matched: group_best_per_episode(new_candidates.clone()),
-            all_new: new_candidates,
-        });
+        return Ok(finish(new_candidates.clone(), new_candidates, rejected));
     }
 
     let audio_langs = audio_langs.to_vec();
@@ -554,7 +672,7 @@ pub async fn find_new_matches(
                         if let Some(m) = real_magnet {
                             candidate.magnet = m;
                         }
-                        matches_language_text(&description, &audio_langs, &sub_langs)
+                        matches_language(&description, &candidate.title, &audio_langs, &sub_langs)
                             .then_some(candidate)
                     }
                     Err(_) => None,
@@ -566,17 +684,10 @@ pub async fn find_new_matches(
         .collect()
         .await;
 
-    Ok(MatchResult {
-        matched: group_best_per_episode(matched),
-        all_new: new_candidates,
-    })
+    rejected.language = new_candidates.len() - matched.len();
+    Ok(finish(matched, new_candidates, rejected))
 }
 
-/// Busca cirúrgica de UM episódio, ignorando `seen_items` de propósito — é
-/// pra "Forçar verificação" (menu "..." na Biblioteca) reconsiderar até
-/// candidato já visto/descartado antes. Sem season detectável na query
-/// (show sem "Season N" no título), assume S01 — praticamente todo release
-/// do Nyaa marca "SxxEyy" mesmo pra anime de temporada única.
 pub async fn find_best_for_episode(
     client: &reqwest::Client,
     query: &str,
@@ -589,6 +700,7 @@ pub async fn find_best_for_episode(
     let season = season.unwrap_or(1);
     let probe_query = format!("{base_query} S{season:02}E{episode_number:02}");
     let candidates = search(client, &probe_query).await?;
+    let candidates = with_language_searches(client, &base_query, audio_langs, sub_langs, candidates).await;
 
     let filtered: Vec<NyaaCandidate> = candidates
         .into_iter()
@@ -613,7 +725,7 @@ pub async fn find_best_for_episode(
                             if let Some(m) = real_magnet {
                                 candidate.magnet = m;
                             }
-                            matches_language_text(&description, &audio_langs, &sub_langs).then_some(candidate)
+                            matches_language(&description, &candidate.title, &audio_langs, &sub_langs).then_some(candidate)
                         }
                         Err(_) => None,
                     }
@@ -631,6 +743,66 @@ pub async fn find_best_for_episode(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn names(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn language_from_release_title() {
+        let ptbr = vec!["Portuguese (Brazil)".to_string()];
+        assert!(matches_language("", "Steins;Gate (01-24) [1080p] [PT-BR]", &[], &ptbr));
+        assert!(matches_language("", "[Punch-Fansub] Steins;Gate: Episódio 18 HD sub pt-br", &[], &ptbr));
+        assert!(!matches_language("", "[Cleo] Steins;Gate [Dual Audio 10bit BD1080p]", &[], &ptbr));
+        assert!(!matches_language("", "Show - 05 [PT-BR]", &ptbr, &[]));
+        assert!(matches_language("", "Show - 05 [Dublado PT-BR]", &ptbr, &[]));
+        assert!(language_searches("Show", &[], &[]).is_empty());
+        assert_eq!(
+            language_searches("Show", &[], &ptbr),
+            vec![("Show".to_string(), "1_3"), ("Show PT-BR".to_string(), "1_0")]
+        );
+    }
+
+    #[test]
+    fn episode_number_from_common_anime_naming() {
+        assert_eq!(extract_episode_number("[SubsPlease] Show - 05 (1080p) [ABCD].mkv"), Some(5));
+        assert_eq!(extract_episode_number("[Group] Show - 12v2 [1080p]"), Some(12));
+        assert_eq!(extract_episode_number("Show - 07.mkv"), Some(7));
+        assert_eq!(extract_episode_number("Show S02E03 1080p"), Some(3));
+        assert_eq!(extract_episode_number("Show EP08 [720p]"), Some(8));
+        assert_eq!(extract_episode_number("[Erai-raws] Show - 01 ~ 23 [1080p]"), None);
+        assert_eq!(extract_episode_number("[HorribleSubs] Show (01-24) [720p] (Batch)"), None);
+    }
+
+    #[test]
+    fn other_works_of_the_franchise_are_rejected() {
+        let sg = names(&["Steins;Gate"]);
+        assert!(is_other_work("[HorribleSubs] Steins Gate 0 - 24 [1080p].mkv", &sg, 1));
+        assert!(is_other_work("[Exiled-Destiny] Steins;Gate - The Movie [Dual Audio]", &sg, 1));
+        assert!(!is_other_work("[Cleo] Steins;Gate [Dual Audio 10bit BD1080p][HEVC-x265]", &sg, 1));
+        assert!(!is_other_work("[Group] Steins;Gate - 05 [1080p]", &sg, 1));
+        let sg0 = names(&["Steins;Gate 0", "Steins;Gate"]);
+        assert!(!is_other_work("[HorribleSubs] Steins Gate 0 - 24 [1080p].mkv", &sg0, 1));
+        let show = names(&["Show"]);
+        assert!(is_other_work("[Group] Show Season 2 - 05", &show, 1));
+        assert!(!is_other_work("[Group] Show Season 2 - 05", &show, 2));
+        assert!(is_other_work("[Group] Show 2nd Season - 05", &show, 1));
+        assert!(!is_other_work("[Group] Unrelated Name - 05", &show, 1));
+        assert!(is_other_work("Gekijouban Steins;Gate - Fuka Ryouiki no Deja vu", &sg, 1));
+    }
+
+    #[test]
+    fn pack_files_map_to_episodes() {
+        let sg = names(&["Steins;Gate"]);
+        let root = "[Judas] Steins;Gate (Season 1 + OVA + Movie)";
+        assert_eq!(pack_file_episode(&format!("{root}/[Judas] Steins;Gate - 05.mkv"), &sg, 1), Some(5));
+        assert_eq!(pack_file_episode(&format!("{root}/Specials/[Judas] Steins;Gate - OVA.mkv"), &sg, 1), None);
+        assert_eq!(pack_file_episode(&format!("{root}/NCOP/Steins;Gate NCOP 01.mkv"), &sg, 1), None);
+        assert_eq!(pack_file_episode(&format!("{root}/[Judas] Steins;Gate - 05.ass"), &sg, 1), None);
+        assert_eq!(pack_file_episode("Steins;Gate 0/[Group] Steins;Gate 0 - 05.mkv", &sg, 1), None);
+        assert_eq!(pack_file_episode("Show/12 - Title.mkv", &names(&["Show"]), 1), Some(12));
+        assert_eq!(pack_file_episode("Show S02E03.mkv", &names(&["Show"]), 1), None);
+    }
 
     const SEARCH_FIXTURE: &str = include_str!("../../tests/fixtures/nyaa_search.xml");
 
@@ -679,10 +851,6 @@ mod tests {
 
     #[test]
     fn sanitize_query_defuses_dash_search_syntax() {
-        // Caso real: nyaa devolvia 0 resultados pra essa query mesmo o
-        // torrent existindo, porque "-Starting" era lido como "exclui
-        // Starting" e "World-" quebrava o casamento do token seguinte.
-        // https://nyaa.si/view/2095563
         assert_eq!(
             sanitize_query("Re:ZERO -Starting Life in Another World- S04E01"),
             "Re:ZERO  Starting Life in Another World  S04E01"
@@ -711,11 +879,8 @@ mod tests {
         assert!(title_matches_episode_range("Show S03E05 Title", Some(5), Some(10)));
         assert!(!title_matches_episode_range("Show S03E04 Title", Some(5), Some(10)));
         assert!(!title_matches_episode_range("Show S03E11 Title", Some(5), Some(10)));
-        // sem range = sempre casa
         assert!(title_matches_episode_range("Show S03E01 Title", None, None));
-        // sem numero de episodio reconhecivel = deixa passar (fail-open)
         assert!(title_matches_episode_range("Show Batch Complete", Some(5), Some(10)));
-        // só start, sem end
         assert!(title_matches_episode_range("Show S03E99 Title", Some(5), None));
         assert!(!title_matches_episode_range("Show S03E02 Title", Some(5), None));
     }
@@ -747,11 +912,9 @@ mod tests {
         ];
         let result = group_best_per_episode(candidates);
         assert_eq!(result.len(), 2);
-        // ep1: ToonsHub tem mais seed, vira primary; Feibanyama sobra alternate.
         assert_eq!(result[0].primary.id, "2");
         assert_eq!(result[0].alternates.len(), 1);
         assert_eq!(result[0].alternates[0].id, "1");
-        // ep2: Feibanyama tem mais seed dessa vez.
         assert_eq!(result[1].primary.id, "3");
         assert_eq!(result[1].alternates[0].id, "4");
     }
@@ -766,8 +929,6 @@ mod tests {
 
     #[test]
     fn group_best_per_episode_missing_seeder_count_treated_as_zero() {
-        // seeders=None (RSS às vezes não traz) não deve dar panic nem virar
-        // "infinito" — trata como pior candidato possível.
         let candidates = vec![
             candidate("1", "[NoSeedInfo] Show S04E01 [1080p]"),
             candidate_with_seeders("2", "[ToonsHub] Show S04E01 [1080p]", 1),
@@ -779,7 +940,6 @@ mod tests {
 
     #[test]
     fn title_matches_season_covers_real_world_naming_conventions() {
-        // Todos títulos reais puxados do nyaa.si pra "Mushoku Tensei ... Season 3".
         assert!(title_matches_season(
             "[Yameii] Mushoku Tensei: Jobless Reincarnation - S03E11 [English Dub]",
             3
@@ -796,7 +956,6 @@ mod tests {
             "[Fuchs] Mushoku Tensei - S03E05 ... | Jobless Reincarnation (Season 3)",
             3
         ));
-        // Season 2 não pode casar quando o watch é da Season 3.
         assert!(!title_matches_season(
             "[ZeroBuild] Mushoku Tensei: Jobless Reincarnation Season 2 Cour 2",
             3
@@ -812,7 +971,6 @@ mod tests {
         assert!(matches_quality("[Group] Show - 01 [1080p][AAC]", "1080p"));
         assert!(matches_quality("[Group] Show - 01 [1080P][AAC]", "1080p"));
         assert!(!matches_quality("[Group] Show - 01 [720p][AAC]", "1080p"));
-        // "1080" sem "p" nao deve casar (evita falso positivo com ano/resolucao truncada)
         assert!(!matches_quality("[Group] Show 1080 - 01", "1080p"));
     }
 
@@ -839,8 +997,6 @@ mod tests {
 
     #[test]
     fn language_line_extraction_reads_block_lists() {
-        // Formato em bloco: título sozinho e
-        // uma faixa por linha.
         let description = "**Audio**\nJapanese / E-AC-3 / 2.0\nEnglish / E-AC-3 / 2.0\n\n\
             **Subtitles**\nEnglish / Full / Default / ASS\nPortuguese (Brazil) / Full / Default / ASS / CR\n\n\
             **Chapters**\nPrologue / Opening / Part A";
@@ -865,16 +1021,11 @@ mod tests {
             &["French".to_string()],
             &[]
         ));
-        // sem preferencia de idioma = sempre casa
         assert!(matches_language_text(description, &[], &[]));
     }
 
     #[test]
     fn matches_language_text_ignores_bold_markdown_around_each_language_name() {
-        // Formato real de release VARYG/CR: cada idioma da lista vem em
-        // negrito próprio, então "**Portuguese**" fica separado de
-        // "(Brazilian)" pelos asteriscos — sem stripar isso o match de
-        // substring falhava mesmo o PT-BR estando ali (bug real reportado).
         let description = "`Subtitles (15):` **English** [Forced], ASS │ **Portuguese** (Brazilian), ASS │ **Russian**, ASS";
         assert!(matches_language_text(
             description,
@@ -906,12 +1057,6 @@ mod tests {
 
     #[test]
     fn fetch_detail_matches_real_world_varyg_page() {
-        // Fixture baixada de verdade de nyaa.si/view/1957926 (Re:ZERO S03E16,
-        // upload VARYG) — bug real reportado: PT-BR existe no release
-        // ("`Subtitles (15):` ... **Portuguese** (Brazilian), ASS") mas não
-        // batia por 2 motivos: label com backtick+contagem "(15)" não era
-        // capturado, e "Brazilian" (adjetivo) não batia contra "Brazil"
-        // (rótulo canônico) por substring simples.
         let description = extract_description(REAL_VARYG_FIXTURE);
         assert!(matches_language_text(
             &description,
@@ -927,8 +1072,6 @@ mod tests {
 
     #[test]
     fn fetch_detail_matches_real_world_toonshub_page() {
-        // Fixture baixada de verdade de nyaa.si/view/2164140 (Mushoku Tensei S03E10,
-        // upload do ToonsHub) — o caso real que motivou esse fix.
         let description = extract_description(REAL_DETAIL_FIXTURE);
         assert!(matches_language_text(
             &description,
@@ -961,7 +1104,6 @@ mod tests {
         );
         assert!(result.subtitles.contains(&"Portuguese (Brazil)".to_string()));
         assert!(result.subtitles.contains(&"Thai".to_string()));
-        // Idioma que não existe na descrição não aparece.
         assert!(!result.audio.iter().any(|l| l == "Vietnamese" || l == "Polish"));
     }
 
@@ -975,9 +1117,6 @@ mod tests {
 
     #[test]
     fn fetch_detail_handles_raw_markdown_blob_with_bullet_dashes() {
-        // Formato real do nyaa.si (ex. uploads do ToonsHub): a descrição é
-        // markdown cru dentro de um único text node (`&#10;` vira \n real ao
-        // decodificar), não HTML renderizado. O label vem depois de "- ".
         let html = "<html><body><div id=\"torrent-description\">**File Details:**&#10;\
             - **Video Quality:** 1080p WEB-DL H.264 (CR)&#10;\
             - **Audio:** Japanese, English, Portuguese (Brazil)&#10;\
@@ -994,8 +1133,6 @@ mod tests {
 
     #[test]
     fn fetch_detail_merges_label_and_value_split_across_rendered_tags() {
-        // Alguns uploaders mandam HTML de verdade já renderizado: <strong>Audio:</strong>
-        // vira um text node separado do valor, então precisa juntar por <li>/<p>.
         let html = r#"
             <html><body>
               <div id="torrent-description">

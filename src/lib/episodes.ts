@@ -1,7 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-/** "ready": fonte achada, esperando ser aberta no player (anime em modo Streaming). */
 export type EpisodeStatus = "pending" | "found" | "ready" | "downloading" | "available" | "error" | "deleted";
 
 export interface Episode {
@@ -20,12 +19,16 @@ export interface Episode {
   available_at: string | null;
   deleted_at: string | null;
   episode_number: number | null;
-  /** Onde o player parou da última vez (ms). */
   watch_position_ms: number | null;
-  /** Quando foi assistido até o encerramento/90% (ISO). */
   watched_at: string | null;
-  /** Última vez que o player salvou progresso (ISO). */
   watch_progress_at: string | null;
+  /** File inside a season pack; null = single-episode torrent. */
+  file_index: number | null;
+}
+
+/** Episodes downloaded from the same season pack share this key. */
+export function packKey(ep: Episode): string | null {
+  return ep.file_index != null && ep.source_item_id ? `${ep.watch_id}:${ep.source_item_id}` : null;
 }
 
 export interface DownloadProgress {
@@ -44,7 +47,6 @@ export async function listRecentEpisodes(): Promise<Episode[]> {
   return invoke<Episode[]>("list_recent_episodes");
 }
 
-/** Todos os episódios prontos pra assistir, de todos os animes. */
 export async function listAvailableEpisodes(): Promise<Episode[]> {
   return invoke<Episode[]>("list_available_episodes");
 }
@@ -85,28 +87,25 @@ export async function switchEpisodeSource(episodeId: number, sourceItemId: strin
   return invoke<void>("switch_episode_source", { episodeId, sourceItemId });
 }
 
-/** true = achou e iniciou download; false = nenhum candidato dessa vez. */
-/** Busca e começa todos os episódios que faltam da temporada (dentro do
- * intervalo escolhido). Roda em segundo plano; devolve quantos entraram. */
 export async function downloadMissingEpisodes(watchId: number): Promise<number> {
   return invoke<number>("download_missing_episodes", { watchId });
 }
 
-/** URL pra assistir enquanto baixa (servidor local do Torii, ver
- * src-tauri/src/stream_server.rs). Só pra episódio baixando. */
 export async function episodeStreamUrl(episodeId: number): Promise<string> {
   return invoke<string>("episode_stream_url", { episodeId });
 }
 
-/** Começa o download se precisar (anime em modo Streaming) e devolve a URL
- * do stream local. Pode levar alguns segundos: busca a fonte e conecta nos peers. */
 export async function episodeStreamStart(episodeId: number): Promise<string> {
   return invoke<string>("episode_stream_start", { episodeId });
 }
 
-/** Modo Streaming: começa a baixar o episódio seguinte (chamado na metade do atual). */
 export async function episodePrefetchNext(watchId: number, episodeNumber: number): Promise<void> {
   return invoke<void>("episode_prefetch_next", { watchId, episodeNumber });
+}
+
+/** Deletes the episode's file and marks it removed: it is not downloaded again automatically. */
+export async function deleteEpisode(episodeId: number): Promise<void> {
+  return invoke<void>("delete_episode", { episodeId });
 }
 
 export async function forceCheckEpisode(episodeId: number): Promise<boolean> {

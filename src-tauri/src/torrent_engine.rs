@@ -1,58 +1,127 @@
 use librqbit::api::TorrentIdOrHash;
-use librqbit::{AddTorrent, AddTorrentOptions, ManagedTorrent, Session, TorrentStats};
-use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
+use librqbit::{AddTorrent, AddTorrentOptions, AddTorrentResponse, ManagedTorrent, Session, TorrentStats};
+use std::collections::{HashMap, HashSet};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
 
-/// Sem isso, um magnet sem peer respondendo (comum — nem todo torrent do
-/// Nyaa tem seed saudável) trava `add_torrent` esperando metadata pra
-/// sempre. Como quem chama processa vários episódios em sequência (ver
-/// `poll_watch`), 1 magnet travado travava TODOS os episódios depois dele
-/// na mesma leva — bug real reportado (Re:ZERO S3 parava sempre no mesmo
-/// episódio, o resto nunca era tentado).
 const ADD_TORRENT_TIMEOUT: Duration = Duration::from_secs(45);
+const INIT_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// Episodes map to torrents; several episodes can share one season-pack torrent, each
+/// pointing at its own file (`files`). Only the files of tracked episodes are downloaded.
 pub struct TorrentEngine {
     session: Arc<Session>,
-    // episode_id -> handle, pra reconciler poder pedir stats sem precisar
-    // re-resolver por id/hash a cada tick.
     active: Mutex<HashMap<i64, Arc<ManagedTorrent>>>,
+    files: Mutex<HashMap<i64, usize>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PackFile {
+    pub index: usize,
+    pub path: String,
+    pub len: u64,
+}
+
+fn timeout_error() -> anyhow::Error {
+    anyhow::anyhow!(tr!(
+        "timeout resolvendo metadata do torrent (sem peers respondendo)",
+        "timed out resolving torrent metadata (no peers responding)"
+    ))
 }
 
 impl TorrentEngine {
     pub async fn new(default_output_folder: PathBuf) -> anyhow::Result<Self> {
         let session = Session::new(default_output_folder).await?;
-        Ok(Self {
-            session,
-            active: Mutex::new(HashMap::new()),
-        })
+        Ok(Self { session, active: Mutex::new(HashMap::new()), files: Mutex::new(HashMap::new()) })
     }
 
-    /// Adiciona um magnet e passa a rastrear ele sob o episode_id, devolvendo
-    /// o info_hash real (pra correlação estável entre restarts, ao invés da
-    /// convenção de string frágil que o app antigo em Python usava).
+    /// `file_index`: the episode's file inside a season pack; `None` = single-episode torrent.
     pub async fn add_download(
         &self,
         episode_id: i64,
         magnet: &str,
         output_folder: &str,
+        file_index: Option<usize>,
     ) -> anyhow::Result<String> {
         let opts = AddTorrentOptions {
             output_folder: Some(output_folder.to_string()),
             overwrite: true,
+            only_files: file_index.map(|i| vec![i]),
             ..Default::default()
         };
-        let response = tokio::time::timeout(
-            ADD_TORRENT_TIMEOUT,
-            self.session.add_torrent(AddTorrent::from_url(magnet), Some(opts)),
-        )
-        .await
-        .map_err(|_| anyhow::anyhow!(tr!("timeout resolvendo metadata do torrent (sem peers respondendo)", "timed out resolving torrent metadata (no peers responding)")))??;
-        let handle = response
-            .into_handle()
-            .ok_or_else(|| anyhow::anyhow!(tr!("torrent ficou list-only, sem handle pra rastrear", "torrent ended up list-only, no handle to track")))?;
+        let response =
+            tokio::time::timeout(ADD_TORRENT_TIMEOUT, self.session.add_torrent(AddTorrent::from_url(magnet), Some(opts)))
+                .await
+                .map_err(|_| timeout_error())??;
+        let (handle, already_managed) = match response {
+            AddTorrentResponse::Added(_, handle) => (handle, false),
+            AddTorrentResponse::AlreadyManaged(_, handle) => (handle, true),
+            AddTorrentResponse::ListOnly(_) => anyhow::bail!(tr!(
+                "torrent ficou list-only, sem handle pra rastrear",
+                "torrent ended up list-only, no handle to track"
+            )),
+        };
         let info_hash = handle.info_hash().as_string();
-        self.active.lock().await.insert(episode_id, handle);
+
+        let mut active = self.active.lock().await;
+        let mut files = self.files.lock().await;
+        active.insert(episode_id, handle.clone());
+        match file_index {
+            Some(index) => {
+                files.insert(episode_id, index);
+                if already_managed {
+                    let wanted = shared_files(&active, &files, &handle);
+                    drop((active, files));
+                    self.update_files(&handle, &wanted).await?;
+                }
+            }
+            None => {
+                files.remove(&episode_id);
+            }
+        }
         Ok(info_hash)
+    }
+
+    /// Files of a torrent without downloading it.
+    pub async fn list_files(&self, magnet: &str) -> anyhow::Result<Vec<PackFile>> {
+        let opts = AddTorrentOptions { list_only: true, ..Default::default() };
+        let response =
+            tokio::time::timeout(ADD_TORRENT_TIMEOUT, self.session.add_torrent(AddTorrent::from_url(magnet), Some(opts)))
+                .await
+                .map_err(|_| timeout_error())??;
+        let files = match response {
+            AddTorrentResponse::ListOnly(list) => list
+                .info
+                .iter_file_details()
+                .enumerate()
+                .filter(|(_, f)| !f.attrs().padding)
+                .map(|(index, f)| PackFile { index, path: f.filename.to_pathbuf().to_string_lossy().to_string(), len: f.len })
+                .collect(),
+            AddTorrentResponse::AlreadyManaged(_, handle) | AddTorrentResponse::Added(_, handle) => {
+                let meta = handle.metadata.load();
+                meta.as_ref()
+                    .map(|m| {
+                        m.file_infos
+                            .iter()
+                            .enumerate()
+                            .map(|(index, f)| PackFile {
+                                index,
+                                path: f.relative_filename.to_string_lossy().to_string(),
+                                len: f.len,
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            }
+        };
+        Ok(files)
+    }
+
+    /// librqbit refuses to change the file selection while a torrent is still checking
+    /// its files, which happens right after a pack is added.
+    async fn update_files(&self, handle: &Arc<ManagedTorrent>, wanted: &HashSet<usize>) -> anyhow::Result<()> {
+        let _ = tokio::time::timeout(INIT_TIMEOUT, handle.wait_until_initialized()).await;
+        self.session.update_only_files(handle, wanted).await
     }
 
     pub async fn pause(&self, episode_id: i64) -> anyhow::Result<()> {
@@ -71,52 +140,91 @@ impl TorrentEngine {
         Ok(())
     }
 
-    /// Snapshot de progresso de tudo que tá sendo rastreado no momento. Quem
-    /// chama decide o que fazer com itens já `finished` (ex. persistir status
-    /// e parar de rastrear via `untrack`).
+    /// Per-episode stats; for season packs, progress and completion of the episode's file.
     pub async fn snapshot(&self) -> Vec<(i64, TorrentStats)> {
         let active = self.active.lock().await;
+        let files = self.files.lock().await;
         active
             .iter()
-            .map(|(episode_id, handle)| (*episode_id, handle.stats()))
+            .map(|(episode_id, handle)| {
+                let mut stats = handle.stats();
+                if let Some(&index) = files.get(episode_id) {
+                    let len = handle
+                        .metadata
+                        .load()
+                        .as_ref()
+                        .and_then(|m| m.file_infos.get(index).map(|f| f.len))
+                        .unwrap_or(0);
+                    let done = stats.file_progress.get(index).copied().unwrap_or(0);
+                    stats.progress_bytes = done;
+                    stats.total_bytes = len;
+                    stats.finished = len > 0 && done >= len;
+                }
+                (*episode_id, stats)
+            })
             .collect()
     }
 
-    /// Caminho completo do arquivo principal (maior arquivo) do torrent, se
-    /// os metadados já resolveram. Usado pra renomear o arquivo baixado com
-    /// um nome limpo assim que termina.
-    /// Torrent + arquivo principal (índice, tamanho, nome) do episódio, pra
-    /// assistir enquanto baixa (ver `stream_server`). `None` se o episódio
-    /// não está no motor ou os metadados ainda não chegaram.
-    pub async fn stream_target(&self, episode_id: i64) -> Option<(Arc<ManagedTorrent>, usize, u64, String)> {
+    async fn episode_file(&self, episode_id: i64) -> Option<(Arc<ManagedTorrent>, usize)> {
         let handle = self.active.lock().await.get(&episode_id).cloned()?;
+        let index = match self.files.lock().await.get(&episode_id).copied() {
+            Some(index) => index,
+            None => {
+                let meta = handle.metadata.load();
+                meta.as_ref()?.file_infos.iter().enumerate().max_by_key(|(_, f)| f.len)?.0
+            }
+        };
+        Some((handle, index))
+    }
+
+    pub async fn stream_target(&self, episode_id: i64) -> Option<(Arc<ManagedTorrent>, usize, u64, String)> {
+        let (handle, index) = self.episode_file(episode_id).await?;
         let meta = handle.metadata.load();
-        let (index, file) = meta.as_ref()?.file_infos.iter().enumerate().max_by_key(|(_, f)| f.len)?;
-        let name = file.relative_filename.to_string_lossy().to_string();
-        let len = file.len;
+        let file = meta.as_ref()?.file_infos.get(index)?;
+        let (name, len) = (file.relative_filename.to_string_lossy().to_string(), file.len);
         drop(meta);
         Some((handle, index, len, name))
     }
 
     pub async fn primary_file_path(&self, episode_id: i64) -> Option<PathBuf> {
-        let handle = self.active.lock().await.get(&episode_id).cloned()?;
-        let output_folder = handle.output_folder().to_path_buf();
+        let (handle, index) = self.episode_file(episode_id).await?;
         let meta = handle.metadata.load();
-        let file_infos = &meta.as_ref()?.file_infos;
-        let biggest = file_infos.iter().max_by_key(|f| f.len)?;
-        Some(output_folder.join(&biggest.relative_filename))
+        let file = meta.as_ref()?.file_infos.get(index)?;
+        Some(handle.output_folder().join(&file.relative_filename))
     }
 
-    /// Remove o torrent da sessão (para de baixar/semear) e opcionalmente
-    /// apaga os arquivos já baixados. Usado tanto pra "cancelar" um download
-    /// em andamento (delete_files=true) quanto pra "remover" um já concluído
-    /// da lista sem mexer no arquivo (delete_files=false).
+    /// Stops tracking the episode. A pack shared with other episodes keeps running
+    /// without this episode's file (deleted from disk when `delete_files`).
     pub async fn remove(&self, episode_id: i64, delete_files: bool) -> anyhow::Result<()> {
-        let handle = self.active.lock().await.remove(&episode_id);
-        if let Some(handle) = handle {
-            let id = TorrentIdOrHash::Hash(handle.info_hash());
-            self.session.delete(id, delete_files).await?;
+        let path = if delete_files { self.primary_file_path(episode_id).await } else { None };
+        let mut active = self.active.lock().await;
+        let mut files = self.files.lock().await;
+        let Some(handle) = active.remove(&episode_id) else { return Ok(()) };
+        files.remove(&episode_id);
+        let shared = active.values().any(|h| h.info_hash() == handle.info_hash());
+        if shared {
+            let wanted = shared_files(&active, &files, &handle);
+            drop((active, files));
+            self.update_files(&handle, &wanted).await?;
+            if let Some(path) = path {
+                let _ = tokio::fs::remove_file(path).await;
+            }
+            return Ok(());
         }
+        drop((active, files));
+        self.session.delete(TorrentIdOrHash::Hash(handle.info_hash()), delete_files).await?;
         Ok(())
     }
+}
+
+fn shared_files(
+    active: &HashMap<i64, Arc<ManagedTorrent>>,
+    files: &HashMap<i64, usize>,
+    handle: &Arc<ManagedTorrent>,
+) -> HashSet<usize> {
+    active
+        .iter()
+        .filter(|(_, h)| h.info_hash() == handle.info_hash())
+        .filter_map(|(id, _)| files.get(id).copied())
+        .collect()
 }
