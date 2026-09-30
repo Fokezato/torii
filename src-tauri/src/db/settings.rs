@@ -8,18 +8,9 @@ const DEFAULTS: &[(&str, &str)] = &[
     ("poll_interval_minutes", "30"),
     ("default_delete_after_days", ""),
     ("paused", "0"),
-    // "native" (player do Torii) ou "external" (player padrão do Windows).
     ("player_mode", "native"),
-    // Idioma preferido do player nativo (áudio/legenda, separados por
-    // vírgula, mesmo formato de watches.audio_lang/sub_lang) — filtra o
-    // botão de faixas pra não listar as 10+ que um repack costuma
-    // embutir, e auto-seleciona a preferida ao abrir um episódio.
     ("player_preferred_audio_langs", ""),
     ("player_preferred_subtitle_langs", ""),
-    // Pular trechos (ver src/sources/aniskip.rs) — segmentos vêm da AniSkip.
-    // Pulo automático e "próximo episódio depois do encerramento" vêm
-    // desligados (só mudam o comportamento se o usuário ligar); marcação na
-    // barra vem ligada (só visual), uma chave por tipo de trecho.
     ("player_auto_skip_intro", "0"),
     ("player_auto_skip_ending", "0"),
     ("player_auto_skip_recap", "0"),
@@ -27,29 +18,16 @@ const DEFAULTS: &[(&str, &str)] = &[
     ("player_mark_intro", "1"),
     ("player_mark_ending", "1"),
     ("player_mark_recap", "1"),
-    // Luz ambiente (brilho com as cores do vídeo em volta dele).
     ("player_ambient_light", "1"),
-    // Detecta abertura/encerramento comparando o áudio dos episódios quando
-    // o AniSkip não tem os tempos (ver src/intro_detect.rs). Usa o ffmpeg.
     ("detect_segments", "1"),
-    // Confere o latest.json da última release no GitHub ao abrir o app.
     ("auto_update_check", "1"),
-    // Apagar episódio depois de assistido (player nativo marca "assistido"
-    // ao chegar no encerramento/90%) — desligado por padrão; espera N horas
-    // antes de apagar, pra dar tempo de rever.
     ("delete_after_watched", "0"),
     ("delete_after_watched_hours", "24"),
-    // Beta: tira do arquivo as faixas de áudio fora dos idiomas preferidos
-    // (ver src/audio_strip.rs). Baixa o ffmpeg na 1ª vez que é ligado.
     ("strip_unused_audio", "0"),
-    // Beta: recodifica o vídeo pra resolução menor (ver src/downscale.rs).
-    // "original" = desligado; "720p" = ligado pra TODOS os animes (cada
-    // anime só decide sozinho quando isso está desligado).
     ("downscale_resolution", "original"),
     ("close_action", "tray"),
     ("app_language", "auto"),
-    // Notificações: chave mestra desliga tudo de uma vez; cada tipo tem a
-    // própria chave pra desligar individualmente. Ver src/lib/notify.ts.
+    ("onboarding_done", "0"),
     ("notify_master", "1"),
     ("notify_sound", "1"),
     ("notify_found", "1"),

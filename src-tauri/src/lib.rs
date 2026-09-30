@@ -15,6 +15,7 @@ mod media_file;
 mod mkv_fix;
 mod subtitles;
 mod postprocess;
+mod reminders;
 mod jellyfin;
 mod notify;
 mod player;
@@ -32,13 +33,6 @@ use tauri::{
 const NOTIFICATION_WINDOW_SIZE: (f64, f64) = (360.0, 96.0);
 const NOTIFICATION_WINDOW_MARGIN: (i32, i32) = (16, 60);
 
-/// Janela flutuante sem borda pro toast de notificação (ver
-/// `src/routes/NotificationWindow`). Não é toast nativo do Windows — aquele
-/// exige AUMID registrado e continuou sendo descartado mesmo no app
-/// instalado de verdade. Criada escondida, a própria página mostra/esconde
-/// ela via `getCurrentWindow().show()/hide()` conforme a fila de eventos
-/// `notify:show`. Fica sempre no topo e some da taskbar, então aparece
-/// mesmo com a janela principal minimizada na tray.
 fn spawn_notification_window(app: &tauri::App) -> tauri::Result<()> {
     let (width, height) = NOTIFICATION_WINDOW_SIZE;
     let window = WebviewWindowBuilder::new(
@@ -54,19 +48,10 @@ fn spawn_notification_window(app: &tauri::App) -> tauri::Result<()> {
     .transparent(true)
     .shadow(false)
     .resizable(false)
-    // Criada já visível de propósito: um window criado com visible=false e
-    // "mostrado" depois via show() nunca aparece nesse ambiente — mesmo bug
-    // que já pegou a janela principal (ver tray click handler). Fica sempre
-    // mapeada; o conteúdo em branco/transparente já basta pra "esconder".
     .visible(true)
     .focused(false)
     .build()?;
 
-    // Sempre mapeada + always-on-top no canto inferior direito, ela engolia
-    // clique de qualquer coisa embaixo — com o player grande (janela
-    // maximizada num ultrawide), os botões de baixo à direita dos controles
-    // caíam exatamente sob ela e paravam de responder (bug real reportado).
-    // O toast não tem nada clicável, então deixa o clique passar sempre.
     let _ = window.set_ignore_cursor_events(true);
 
     if let Ok(Some(monitor)) = window.primary_monitor() {
@@ -83,14 +68,6 @@ fn spawn_notification_window(app: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Janela transparente dos controles do player (ver `routes/PlayerOverlay`)
-/// — criada 1x no boot, igual a de notificação, em vez de sob demanda ao
-/// entrar na página do player. Criar/fechar por página tinha uma race real
-/// com o StrictMode do React em dev (efeito roda 2x: cria, desmonta/fecha,
-/// remonta/cria de novo — as chamadas open/close concorrentes bagunçavam a
-/// relação de owner window e deixavam a janela principal inteira sem
-/// responder a clique). Existindo a vida toda, a página do player só
-/// reposiciona ela (`player_set_video_area`), nunca cria/destrói.
 fn spawn_player_overlay_window(app: &tauri::App, main: &tauri::WebviewWindow) -> tauri::Result<()> {
     let builder = WebviewWindowBuilder::new(app, "player-overlay", WebviewUrl::App("index.html#/player-overlay".into()))
         .title("")
@@ -99,13 +76,10 @@ fn spawn_player_overlay_window(app: &tauri::App, main: &tauri::WebviewWindow) ->
         .shadow(false)
         .skip_taskbar(true)
         .resizable(false)
-        // Linux: começa oculta (ver `commands::player::hide_overlay`).
         .visible(cfg!(windows))
         .focused(false)
         .inner_size(1.0, 1.0)
         .position(-2000.0, -2000.0);
-    // Windows: janela "owned" (fica acima da principal sem ser topmost).
-    // Linux: transient da principal — mesmo efeito pelo gerenciador de janelas.
     #[cfg(windows)]
     let builder = builder.owner(main)?;
     #[cfg(not(windows))]
@@ -114,7 +88,6 @@ fn spawn_player_overlay_window(app: &tauri::App, main: &tauri::WebviewWindow) ->
     Ok(())
 }
 
-// Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
@@ -122,21 +95,13 @@ fn greet(name: &str) -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // O vídeo é uma janela X11 embutida (ver `player::window`) — no Wayland
-    // isso não existe, então roda pelo XWayland.
+    // libVLC can only embed into X11 windows; run under XWayland on Wayland.
     #[cfg(target_os = "linux")]
     if std::env::var_os("GDK_BACKEND").is_none() {
         std::env::set_var("GDK_BACKEND", "x11");
     }
     tauri::Builder::default()
-        // Tem que ser o primeiro plugin registrado (recomendação da própria
-        // doc do Tauri) pra funcionar direito no Windows. Segunda instância
-        // não abre outra janela nem duplica engine/torrent/tray — só foca a
-        // que já tá rodando.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            // Spawned em vez de chamado direto: já vimos nessa mesma base de
-            // código (tray click handler) que chamar show()/set_focus() de
-            // forma síncrona reentrante no main thread é pouco confiável.
             let app = app.clone();
             tauri::async_runtime::spawn(async move {
                 if let Some(window) = app.get_webview_window("main") {
@@ -149,9 +114,6 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        // Atualização automática: lê o latest.json da última release no
-        // GitHub (sem servidor próprio) e só aceita pacote assinado com a
-        // chave do Torii (chave pública no tauri.conf.json).
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_autostart::init(
@@ -190,7 +152,6 @@ pub fn run() {
             });
             app.manage(player::PlayerState::default());
             app.manage(discord::Presence::start());
-            // Servidor local do "assistir enquanto baixa".
             match tauri::async_runtime::block_on(stream_server::start(app.handle().clone())) {
                 Ok(server) => {
                     app.manage(server);
@@ -200,6 +161,7 @@ pub fn run() {
 
             tauri::async_runtime::spawn(engine::backfill_placeholder_episodes(app.handle().clone()));
             tauri::async_runtime::spawn(engine::backfill_series(app.handle().clone()));
+            engine::spawn_watched_cleanup_loop(app.handle().clone());
             engine::spawn_background_loop(app.handle().clone());
             engine::spawn_download_reconciler(app.handle().clone());
             tauri::async_runtime::spawn(engine::resume_pending_downloads(app.handle().clone()));
@@ -210,8 +172,6 @@ pub fn run() {
                 });
             }
             tauri::async_runtime::spawn(engine::resync_jellyfin_library(app.handle().clone()));
-            // Detecção de abertura/encerramento dos episódios já baixados —
-            // espera o boot assentar antes de ocupar disco/CPU.
             {
                 let app = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
@@ -238,11 +198,6 @@ pub fn run() {
                     } = event
                     {
                         let app = tray.app_handle().clone();
-                        // Dispatched off the main thread on purpose: this callback runs
-                        // reentrant on the main thread (nested inside the tray WndProc),
-                        // and Tauri's window ops special-case "already on main thread" by
-                        // running inline instead of queuing through the event loop, which
-                        // is unreliable from here. Spawning takes the normal queued path.
                         tauri::async_runtime::spawn(async move {
                             if let Some(window) = app.get_webview_window("main") {
                                 let _ = window.unminimize();
@@ -267,8 +222,6 @@ pub fn run() {
                 .build(app)?;
 
             if let Some(window) = app.get_webview_window("main") {
-                // Autostart passa "--hidden" (ver .plugin(tauri_plugin_autostart::init))
-                // pra abrir direto na bandeja em vez de mostrar a janela.
                 if std::env::args().any(|a| a == "--hidden") {
                     let _ = window.hide();
                 }
@@ -276,9 +229,6 @@ pub fn run() {
                 let window_clone = window.clone();
                 window.on_window_event(move |event| {
                     if let WindowEvent::CloseRequested { api, .. } = event {
-                        // Sempre previne o close nativo primeiro (síncrono,
-                        // tem que ser aqui); a settings (tray ou sair de vez)
-                        // só dá pra ler de forma assíncrona.
                         api.prevent_close();
                         let app = window_clone.app_handle().clone();
                         let window_clone = window_clone.clone();
@@ -292,14 +242,6 @@ pub fn run() {
                             if close_action == "quit" {
                                 app.exit(0);
                             } else {
-                                // Fechar com o player aberto = encerra o
-                                // player (senão o som seguia na bandeja) e a
-                                // interface volta pra Biblioteca. Na thread
-                                // PRINCIPAL: parar o libvlc fecha a janela do
-                                // vídeo, que é da thread principal — feito
-                                // daqui (thread de fundo) segurando o
-                                // `engine`, travava o app todo enquanto a
-                                // principal esperava o `engine` (bug real).
                                 let main_app = app.clone();
                                 let _ = app.run_on_main_thread(move || {
                                     let state = main_app.state::<player::PlayerState>();
@@ -308,9 +250,6 @@ pub fn run() {
                                 });
                                 let _ = app.emit_to("main", "app:window-hidden", ());
                                 let _ = window_clone.hide();
-                                // Overlay do player é janela própria — sem
-                                // isso ficava flutuando sobre a área de
-                                // trabalho com o app na bandeja (bug real).
                                 if let Some(overlay) = app.get_webview_window("player-overlay") {
                                     commands::player::hide_overlay(&overlay);
                                 }
@@ -318,13 +257,6 @@ pub fn run() {
                         });
                     }
 
-                    // A doc do Win32 diz que janela "owned" some sozinha
-                    // quando a dona minimiza, mas isso não se confirmou na
-                    // prática aqui (overlay do player ficava flutuando por
-                    // cima da área de trabalho com o app minimizado — bug
-                    // real reportado) — força na mão. Dispatched pra não
-                    // ser a chamada reentrante de `is_minimized()` no main
-                    // thread (mesmo motivo dos outros spawns aqui).
                     if let WindowEvent::Resized(_) = event {
                         let app = window_clone.app_handle().clone();
                         let window_clone = window_clone.clone();
@@ -338,10 +270,6 @@ pub fn run() {
                     }
                 });
 
-                // Child HWND nativa pro vídeo do libvlc + carrega o motor.
-                // Best-effort de propósito: se a DLL vendorizada faltar ou
-                // o load falhar, loga e segue sem player em vez de derrubar
-                // o app inteiro (ver `player::PlayerState`).
                 #[cfg(target_os = "linux")]
                 match player::media_session::MediaSession::new(app.handle()) {
                     Ok(session) => {
@@ -392,6 +320,7 @@ pub fn run() {
             commands::season::browse_season,
             commands::season::browse_trending,
             commands::season::anilist_search,
+            commands::season::anilist_catalog,
             commands::season::anime_seasons,
             commands::season::get_anime_news,
             commands::season::get_schedule,
@@ -412,6 +341,7 @@ pub fn run() {
             commands::episodes::pause_episode_download,
             commands::episodes::resume_episode_download,
             commands::episodes::cancel_episode_download,
+            commands::episodes::delete_episode,
             commands::episodes::list_episode_sources,
             commands::episodes::download_missing_episodes,
             commands::episodes::episode_stream_url,
@@ -445,6 +375,7 @@ pub fn run() {
             commands::player::media_probe,
             commands::player::media_frame,
             commands::jellyfin::test_jellyfin_connection,
+            commands::jellyfin::jellyfin_users,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

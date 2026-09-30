@@ -6,14 +6,14 @@ import { useTranslation } from "react-i18next";
 import { broadcastLanguage, t } from "@/i18n";
 import { getSettings, updateSettings } from "@/lib/tauri";
 import { LanguageTagPicker } from "@/components/anime/LanguageTagPicker";
-import { testJellyfinConnection } from "@/lib/jellyfin";
-import { notify } from "@/lib/notify";
-import { listWatches } from "@/lib/watches";
+import { jellyfinUsers, testJellyfinConnection } from "@/lib/jellyfin";
 import { isAutostartEnabled, setAutostart } from "@/lib/autostart";
 import { getVersion } from "@tauri-apps/api/app";
 import { useUpdateStore } from "@/stores/update";
 import { ffmpegInstall, ffmpegStatus } from "@/lib/tools";
 import { IrreversibleToggle } from "@/components/shared/IrreversibleToggle";
+import { DeletionRules, rulesFromSettings } from "@/components/shared/DeletionRules";
+import { requestTour } from "@/lib/tour";
 import {
   Select,
   SelectContent,
@@ -164,24 +164,16 @@ function PathRow({
   );
 }
 
-type NotifyState = "idle" | "sent";
 
-// Cada tipo liga numa chave de settings própria (notify_<id>), lida/gravada
-// pelo motor no Rust (src-tauri/src/notify.rs) antes de emitir. "implemented"
-// = false marca os 3 tipos que ainda não têm gatilho real no motor (o
-// toggle já funciona e fica salvo, só falta a lógica que dispara sozinha —
-// calendário de estreia, status assistido/não-assistido, e aviso antes da
-// limpeza por retenção são features à parte, ainda não existem).
-const SAMPLE_ANIME = "Mushoku Tensei: Jobless Reincarnation";
 
 const NOTIFICATION_TYPES = [
-  { id: "notify_found", key: "found", implemented: true, variant: "info" },
-  { id: "notify_calendar", key: "calendar", implemented: false, variant: "info" },
-  { id: "notify_error", key: "error", implemented: true, variant: "error" },
-  { id: "notify_complete", key: "complete", implemented: true, variant: "success" },
-  { id: "notify_jellyfin", key: "jellyfin", implemented: true, variant: "success" },
-  { id: "notify_watch_reminder", key: "watchReminder", implemented: false, variant: "info" },
-  { id: "notify_delete_reminder", key: "deleteReminder", implemented: false, variant: "error" },
+  { id: "notify_found", key: "found" },
+  { id: "notify_calendar", key: "calendar" },
+  { id: "notify_error", key: "error" },
+  { id: "notify_complete", key: "complete" },
+  { id: "notify_jellyfin", key: "jellyfin" },
+  { id: "notify_watch_reminder", key: "watchReminder" },
+  { id: "notify_delete_reminder", key: "deleteReminder" },
 ] as const;
 
 function NotificationTypeRow({
@@ -189,51 +181,21 @@ function NotificationTypeRow({
   enabled,
   masterEnabled,
   onToggle,
-  sampleImage,
 }: {
   type: (typeof NOTIFICATION_TYPES)[number];
   enabled: boolean;
   masterEnabled: boolean;
   onToggle: (checked: boolean) => void;
-  sampleImage: string | null;
 }) {
   const { t } = useTranslation();
-  const [state, setState] = useState<NotifyState>("idle");
   const base = `config.notifications.${type.key}` as const;
-
-  function handleTest() {
-    notify(t(`${base}.title`), t(`${base}.body`, { anime: SAMPLE_ANIME }), type.variant, sampleImage);
-    setState("sent");
-    setTimeout(() => setState("idle"), 2000);
-  }
-
   return (
-    <SettingRow
-      label={t(`${base}.label`)}
-      description={t(`${base}.description`)}
-      badge={
-        !type.implemented && (
-          <span className="rounded-full border border-[#33374A] px-1.5 py-0.5 text-[9px] font-bold tracking-wide text-[#8A8F9C] uppercase">
-            {t("config.comingSoon")}
-          </span>
-        )
-      }
-    >
-      <div className="flex items-center gap-2.5">
-        <button
-          type="button"
-          onClick={handleTest}
-          className="shrink-0 rounded-lg border border-[#33374A] px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-white/5"
-        >
-          {state === "sent" ? t("config.sent") : t("config.test")}
-        </button>
-        <Switch checked={enabled && masterEnabled} disabled={!masterEnabled} onCheckedChange={onToggle} />
-      </div>
+    <SettingRow label={t(`${base}.label`)} description={t(`${base}.description`)}>
+      <Switch checked={enabled && masterEnabled} disabled={!masterEnabled} onCheckedChange={onToggle} />
     </SettingRow>
   );
 }
 
-// Rótulos montados na hora do render, pra seguir o idioma atual.
 const minutes = (n: number) => t("config.duration.minutes", { count: n });
 const hours = (n: number) => t("config.duration.hours", { count: n });
 const days = (n: number) => t("config.duration.days", { count: n });
@@ -256,24 +218,15 @@ const CREDITS: { name: string; role: "tauri" | "vlc" | "ffmpeg" | "librqbit" | "
   { name: "React, Tailwind CSS, shadcn/ui, Lucide", role: "ui", license: "MIT/ISC" },
 ];
 
-// "0" = no próximo ciclo de limpeza (junto da checagem automática).
-const watchedGraceOptions = () => [
-  { value: "0", label: t("config.duration.rightAfter") },
-  { value: "1", label: hours(1) },
-  { value: "24", label: days(1) },
-  { value: "72", label: days(3) },
-  { value: "168", label: days(7) },
-];
-const retentionOptions = () => [
-  { value: "never", label: t("config.duration.never") },
-  ...[3, 7, 14, 30, 60].map((n) => ({ value: String(n), label: days(n) })),
-];
+
+const ANY_JELLYFIN_USER = "__any__";
 
 export default function Config() {
   const { t } = useTranslation();
   const [active, setActive] = useState<Category>("geral");
   const queryClient = useQueryClient();
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [saveFailed, setSaveFailed] = useState(false);
   const [confirmJellyfin, setConfirmJellyfin] = useState(false);
 
   const testConnection = useMutation({ mutationFn: testJellyfinConnection });
@@ -284,10 +237,14 @@ export default function Config() {
     refetchOnWindowFocus: false,
   });
 
-  const { data: watches } = useQuery({ queryKey: ["watches"], queryFn: listWatches });
-  const sampleCover = watches?.find((w) => w.cover_url)?.cover_url;
 
   const { data: appVersion } = useQuery({ queryKey: ["app-version"], queryFn: getVersion, staleTime: Infinity });
+  const { data: jellyfinUserList } = useQuery({
+    queryKey: ["jellyfin-users", data?.jellyfin_url, data?.jellyfin_api_key],
+    queryFn: jellyfinUsers,
+    enabled: data?.jellyfin_mode === "1",
+    retry: false,
+  });
   const updater = useUpdateStore();
   const { data: autostartEnabled } = useQuery({
     queryKey: ["autostart"],
@@ -298,7 +255,6 @@ export default function Config() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["autostart"] }),
   });
 
-  // Poll rápido só enquanto baixa, pra mostrar o progresso.
   const { data: ffmpeg } = useQuery({
     queryKey: ["ffmpeg-status"],
     queryFn: ffmpegStatus,
@@ -324,8 +280,13 @@ export default function Config() {
     },
     onError: (_err, _values, context) => {
       if (context?.previous) queryClient.setQueryData(["settings"], context.previous);
+      setSavedAt(null);
+      setSaveFailed(true);
     },
-    onSuccess: () => setSavedAt(Date.now()),
+    onSuccess: () => {
+      setSaveFailed(false);
+      setSavedAt(Date.now());
+    },
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["settings"] }),
   });
 
@@ -367,6 +328,15 @@ export default function Config() {
               {active === "geral" && (
                 <>
                   <SettingsGroup title={t("config.general.behavior")}>
+                    <SettingRow label={t("tour.replay")} description={t("tour.replayHint")}>
+                      <button
+                        type="button"
+                        onClick={requestTour}
+                        className="rounded-lg border border-[#33374A] px-3.5 py-2 text-xs font-semibold text-foreground transition-colors hover:bg-white/5"
+                      >
+                        {t("tour.replayButton")}
+                      </button>
+                    </SettingRow>
                     <SettingRow
                       label={t("config.general.autostart")}
                       description={t("config.general.autostartHint")}
@@ -469,6 +439,28 @@ export default function Config() {
                           type="password"
                           onCommit={(v) => patch.mutate({ jellyfin_api_key: v })}
                         />
+                      </SettingRow>
+                      <SettingRow label={t("config.jellyfin.watchedBy")} description={t("config.jellyfin.watchedByHint")}>
+                        <Select
+                          value={s.jellyfin_user_id || ANY_JELLYFIN_USER}
+                          onValueChange={(v) => patch.mutate({ jellyfin_user_id: v === ANY_JELLYFIN_USER ? "" : v })}
+                        >
+                          <SelectTrigger
+                            size="sm"
+                            style={{ backgroundColor: "#1B1E27", borderColor: "#262A35" }}
+                            className="rounded-lg px-3 text-xs"
+                          >
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={ANY_JELLYFIN_USER}>{t("config.jellyfin.anyUser")}</SelectItem>
+                            {(jellyfinUserList ?? []).map((u) => (
+                              <SelectItem key={u.id} value={u.id}>
+                                {u.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </SettingRow>
                       <PathRow
                         label={t("config.downloads.libraryFolder")}
@@ -672,29 +664,6 @@ export default function Config() {
                         </SelectContent>
                       </Select>
                     </SettingRow>
-                    <SettingRow label={t("config.downloads.deleteAfter")} description={t("config.downloads.deleteAfterHint")}>
-                      <Select
-                        value={s.default_delete_after_days || "never"}
-                        onValueChange={(v) =>
-                          patch.mutate({ default_delete_after_days: v === "never" ? "" : v })
-                        }
-                      >
-                        <SelectTrigger
-                          size="sm"
-                          style={{ backgroundColor: "#1B1E27", borderColor: "#262A35" }}
-                          className="rounded-lg px-3 text-xs"
-                        >
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {retentionOptions().map((o) => (
-                            <SelectItem key={o.value} value={o.value}>
-                              {o.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </SettingRow>
                     <SettingRow
                       label={t("config.downloads.pause")}
                       description={t("config.downloads.pauseHint")}
@@ -706,39 +675,19 @@ export default function Config() {
                     </SettingRow>
                   </SettingsGroup>
 
-                  <SettingsGroup title={t("config.downloads.cleanup")}>
-                    <SettingRow
-                      label={t("config.downloads.deleteWatched")}
-                      description={t("config.downloads.deleteWatchedHint")}
-                    >
-                      <Switch
-                        checked={s.delete_after_watched === "1"}
-                        onCheckedChange={(checked) => patch.mutate({ delete_after_watched: checked ? "1" : "0" })}
+                  <SettingsGroup title={t("deletion.title")}>
+                    <div className="px-[18px] py-[15px]">
+                      <DeletionRules
+                        value={rulesFromSettings(s)}
+                        jellyfinUnset={s.jellyfin_mode !== "1"}
+                        onChange={(v) =>
+                          patch.mutate({
+                            default_delete_after_days: v.days == null ? "" : String(v.days),
+                            delete_after_watched: v.afterWatched ? "1" : "0",
+                          })
+                        }
                       />
-                    </SettingRow>
-                    {s.delete_after_watched === "1" && (
-                      <SettingRow label={t("config.downloads.waitBeforeDelete")} description={t("config.downloads.waitBeforeDeleteHint")}>
-                        <Select
-                          value={s.delete_after_watched_hours ?? "24"}
-                          onValueChange={(v) => patch.mutate({ delete_after_watched_hours: v })}
-                        >
-                          <SelectTrigger
-                            size="sm"
-                            style={{ backgroundColor: "#1B1E27", borderColor: "#262A35" }}
-                            className="rounded-lg px-3 text-xs"
-                          >
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {watchedGraceOptions().map((o) => (
-                              <SelectItem key={o.value} value={o.value}>
-                                {o.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </SettingRow>
-                    )}
+                    </div>
                   </SettingsGroup>
 
                   <SettingsGroup title={t("reduceSize.title")}>
@@ -829,7 +778,6 @@ export default function Config() {
                         enabled={s[type.id] !== "0"}
                         masterEnabled={s.notify_master !== "0"}
                         onToggle={(checked) => patch.mutate({ [type.id]: checked ? "1" : "0" })}
-                        sampleImage={sampleCover ?? null}
                       />
                     ))}
                   </SettingsGroup>
@@ -902,10 +850,18 @@ export default function Config() {
             </>
           )}
 
-          <p className="text-[11px] text-[#4E5361]">
-            {t("config.autoSaved")}
-            {patch.isPending && ` ${t("config.saving")}`}
-            {savedAt && !patch.isPending && ` ${t("config.saved")}`}
+          <p
+            className={`text-[11px] transition-colors ${
+              saveFailed ? "text-destructive" : savedAt && !patch.isPending ? "text-[#6FC48A]" : "text-[#4E5361]"
+            }`}
+          >
+            {patch.isPending
+              ? t("config.saving")
+              : saveFailed
+                ? t("config.saveFailed")
+                : savedAt
+                  ? t("config.saved")
+                  : t("config.autoSaved")}
           </p>
         </div>
       </div>
