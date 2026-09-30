@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/Fokezato/torii/releases"><img src="https://img.shields.io/github/v/release/Fokezato/torii?include_prereleases&label=release&color=FF6A45" alt="Latest release"></a>
-  <a href="https://github.com/Fokezato/torii/releases"><img src="https://img.shields.io/github/downloads/Fokezato/torii/total?color=FF6A45" alt="Downloads"></a>
+  <a href="https://github.com/Fokezato/torii/releases"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FFokezato%2Ftorii%2Fbadges%2Fdownloads.json" alt="Downloads"></a>
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Android%20soon-0078D6" alt="Platform: Windows | Linux | Android soon">
   <img src="https://img.shields.io/badge/built%20with-Tauri%202-24C8DB?logo=tauri&logoColor=white" alt="Built with Tauri 2">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-6C7180" alt="License: PolyForm Noncommercial"></a>
