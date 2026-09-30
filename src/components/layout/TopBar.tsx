@@ -1,6 +1,6 @@
 import { useEffect } from "react";
-import { useLocation } from "react-router-dom";
-import { Search, X } from "lucide-react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { Compass, Search, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useSearchStore } from "@/stores/search";
 import { Button } from "@/components/ui/button";
@@ -9,16 +9,15 @@ import { ActivityStatus } from "./ActivityStatus";
 const PLACEHOLDER_BY_ROUTE = {
   "/": "search.home",
   "/library": "search.library",
+  "/explore": "search.home",
 } as const;
 
 export function TopBar() {
   const { term, setTerm } = useSearchStore();
   const location = useLocation();
+  const navigate = useNavigate();
   const { t } = useTranslation();
 
-  // Cada página usa o termo com um sentido diferente (busca de anime na
-  // Home, filtro na Biblioteca) — carregar texto de uma página pra outra
-  // confundiria mais do que ajudaria, então zera ao trocar de rota.
   useEffect(() => {
     setTerm("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -33,7 +32,8 @@ export function TopBar() {
       <div />
 
       {showSearch && (
-        <div className="flex h-10 w-[360px] items-center gap-2.5 rounded-[10px] border border-border bg-muted px-3.5 justify-self-center">
+        <div className="flex items-center gap-2 justify-self-center">
+        <div className="flex h-10 w-[360px] items-center gap-2.5 rounded-[10px] border border-border bg-muted px-3.5">
           <Search className="size-[17px] shrink-0 text-muted-foreground" strokeWidth={1.8} />
           <input
             value={term}
@@ -46,6 +46,18 @@ export function TopBar() {
               <X className="size-3.5" />
             </Button>
           )}
+        </div>
+        {location.pathname === "/" && (
+          <button
+            type="button"
+            onClick={() => navigate("/explore")}
+            title={t("nav.explore")}
+            className="flex h-10 items-center gap-2 rounded-[10px] border border-border bg-muted px-3.5 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <Compass className="size-[17px]" strokeWidth={1.8} />
+            {t("nav.explore")}
+          </button>
+        )}
         </div>
       )}
       {!showSearch && <div />}

@@ -1,9 +1,13 @@
+import { useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { UpdateBanner } from "@/components/layout/UpdateBanner";
 import { useTranslation } from "react-i18next";
-import { Download, Home as HomeIcon, Library, Settings } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
+import { Download, Home as HomeIcon, Library, Search, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { TopBar } from "./TopBar";
+import { Onboarding } from "./Onboarding";
 
 const NAV_ITEMS = [
   { to: "/", labelKey: "nav.home", end: true, icon: HomeIcon },
@@ -11,32 +15,74 @@ const NAV_ITEMS = [
   { to: "/downloads", labelKey: "nav.downloads", end: false, icon: Download },
 ] as const;
 
+// Rendered in a portal: the Explore button lives inside an overflow-hidden animation wrapper.
+function SideTooltip({ label, children }: { label: string; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  return (
+    <div
+      ref={ref}
+      onMouseEnter={() => {
+        const r = ref.current?.getBoundingClientRect();
+        if (r) setPos({ top: r.top + r.height / 2, left: r.right + 10 });
+      }}
+      onMouseLeave={() => setPos(null)}
+    >
+      {children}
+      {pos &&
+        createPortal(
+          <div
+            role="tooltip"
+            style={{ top: pos.top, left: pos.left }}
+            className="pointer-events-none fixed z-[100] -translate-y-1/2 rounded-md border border-[#262A35] bg-[#1B1E27] px-2.5 py-1.5 text-xs font-semibold whitespace-nowrap text-foreground shadow-[0_6px_20px_rgba(0,0,0,0.45)]"
+          >
+            {label}
+          </div>,
+          document.body,
+        )}
+    </div>
+  );
+}
+
 function NavButton({
   to,
   label,
   icon: Icon,
   end,
+  small,
+  parentActive,
+  tour,
 }: {
   to: string;
   label: string;
   icon: typeof HomeIcon;
   end?: boolean;
+  small?: boolean;
+  parentActive?: boolean;
+  tour?: string;
 }) {
   return (
-    <NavLink
-      to={to}
-      end={end}
-      aria-label={label}
-      title={label}
-      className={({ isActive }) =>
-        cn(
-          "flex size-12 items-center justify-center rounded-xl transition-colors",
-          isActive ? "bg-secondary text-primary" : "text-muted-foreground hover:text-foreground",
-        )
-      }
-    >
-      <Icon className="size-[22px]" strokeWidth={1.8} />
-    </NavLink>
+    <SideTooltip label={label}>
+      <NavLink
+        to={to}
+        end={end}
+        aria-label={label}
+        data-tour={tour}
+        className={({ isActive }) =>
+          cn(
+            "flex items-center justify-center rounded-xl transition-colors",
+            small ? "size-10" : "size-12",
+            isActive
+              ? "bg-secondary text-primary"
+              : parentActive
+                ? "text-primary"
+                : "text-muted-foreground hover:text-foreground",
+          )
+        }
+      >
+        <Icon className={small ? "size-[18px]" : "size-[22px]"} strokeWidth={1.8} />
+      </NavLink>
+    </SideTooltip>
   );
 }
 
@@ -64,38 +110,66 @@ export function AppShell() {
         </span>
 
         <div className="flex flex-col items-center gap-2">
-          {NAV_ITEMS.map((item) => (
-            <NavButton key={item.to} to={item.to} end={item.end} icon={item.icon} label={t(item.labelKey)} />
-          ))}
+          {NAV_ITEMS.map((item) =>
+            item.to === "/" ? (
+              <div key={item.to} className="flex flex-col items-center">
+                <NavButton
+                  to={item.to}
+                  end={item.end}
+                  icon={item.icon}
+                  label={t(item.labelKey)}
+                  tour="nav-home"
+                />
+                <AnimatePresence initial={false}>
+                  {(location.pathname === "/" || location.pathname === "/explore") && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: "auto", opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.18 }}
+                      className="flex flex-col items-center overflow-hidden pt-2"
+                    >
+                      <NavButton to="/explore" icon={Search} label={t("nav.explore")} tour="nav-explore" />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            ) : (
+              <NavButton
+                key={item.to}
+                to={item.to}
+                end={item.end}
+                icon={item.icon}
+                label={t(item.labelKey)}
+                tour={item.to === "/library" ? "nav-library" : "nav-downloads"}
+              />
+            ),
+          )}
         </div>
 
         <div className="mt-auto flex flex-col items-center gap-5">
-          <NavLink
-            to="/config"
-            aria-label={t("nav.settings")}
-            title={t("nav.settings")}
-            className={cn(
-              "flex size-11 items-center justify-center rounded-xl transition-colors",
-              location.pathname === "/config"
-                ? "bg-secondary text-primary"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            <Settings className="size-[21px]" strokeWidth={1.8} />
-          </NavLink>
+          <SideTooltip label={t("nav.settings")}>
+            <NavLink
+              to="/config"
+              aria-label={t("nav.settings")}
+              data-tour="nav-settings"
+              className={cn(
+                "flex size-11 items-center justify-center rounded-xl transition-colors",
+                location.pathname === "/config"
+                  ? "bg-secondary text-primary"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <Settings className="size-[21px]" strokeWidth={1.8} />
+            </NavLink>
+          </SideTooltip>
         </div>
       </nav>
 
+      <Onboarding />
       <div className="flex flex-1 flex-col overflow-hidden">
         <TopBar />
         <main className="flex-1 overflow-y-auto px-8 py-7">
-          {/* h-full: rota que precisa preencher a altura disponível sem
-              scroll (ex. player de vídeo) tem em que basear o próprio
-              h-full — sem isso o wrapper crescia só com o conteúdo (auto),
-              não tinha altura definida pra nada herdar. Scroll de página
-              longa continua funcionando normal: quem rola é o <main> (via
-              overflow-y-auto), não esse wrapper — h-full aqui não clipa
-              nada, só dá uma base de altura real pra quem quiser usar. */}
           <div className="flex h-full flex-col gap-9">
             <Outlet />
             <UpdateBanner />

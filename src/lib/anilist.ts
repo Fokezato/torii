@@ -15,6 +15,9 @@ export interface AnimeSummary {
   description: string | null;
   season: string | null;
   season_year: number | null;
+  format: string | null;
+  start_year: number | null;
+  start_month: number | null;
   next_airing_at: number | null;
   next_airing_episode: number | null;
   upcoming_episodes: { episode: number; airing_at: number }[];
@@ -32,6 +35,27 @@ export async function anilistSearch(q: string): Promise<AnimeSummary[]> {
   return invoke<AnimeSummary[]>("anilist_search", { q });
 }
 
+export interface CatalogFilter {
+  search?: string;
+  genres: string[];
+  year?: number;
+  season?: string;
+  formats: string[];
+  status?: string;
+  min_score?: number;
+  sort?: string;
+}
+
+export interface CatalogPage {
+  items: AnimeSummary[];
+  has_next: boolean;
+  total: number | null;
+}
+
+export async function anilistCatalog(filter: CatalogFilter, page: number): Promise<CatalogPage> {
+  return invoke<CatalogPage>("anilist_catalog", { filter, page });
+}
+
 export async function getSchedule(ids: number[]): Promise<AnimeSummary[]> {
   return invoke<AnimeSummary[]>("get_schedule", { ids });
 }
@@ -41,15 +65,10 @@ export async function getAnimeById(id: number): Promise<AnimeSummary | null> {
   return results[0] ?? null;
 }
 
-/** Todas as temporadas (TV) do anime, em ordem de lançamento (1ª = raiz). */
 export async function getAnimeSeasons(anilistId: number): Promise<AnimeSummary[]> {
   return invoke<AnimeSummary[]>("anime_seasons", { anilistId });
 }
 
-/** Nome da aba de temporada: o que sobra do título depois do nome do anime.
- * "Mushoku Tensei: Jobless Reincarnation Season 2 Part 2" → "Temporada 2 Parte 2";
- * "Demon Slayer: Kimetsu no Yaiba Entertainment District Arc" → "Entertainment District Arc";
- * igual ao nome do anime → "Temporada 1". */
 export function seasonTabLabel(seasonTitle: string, seriesTitle: string | null): string {
   let rest = seasonTitle;
   if (seriesTitle && seasonTitle.toLowerCase().startsWith(seriesTitle.toLowerCase())) {

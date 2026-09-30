@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import i18n from "@/i18n";
 import { AppShell } from "@/components/layout/AppShell";
 import Home from "@/routes/Home";
+import Explore from "@/routes/Explore";
 import Library from "@/routes/Library";
 import LibraryDetail from "@/routes/LibraryDetail";
 import Downloads from "@/routes/Downloads";
@@ -21,6 +22,7 @@ const router = createHashRouter([
     element: <AppShell />,
     children: [
       { path: "/", element: <Home /> },
+      { path: "/explore", element: <Explore /> },
       { path: "/library", element: <Library /> },
       { path: "/library/:id", element: <LibraryDetail /> },
       { path: "/downloads", element: <Downloads /> },
@@ -29,7 +31,6 @@ const router = createHashRouter([
   },
   { path: "/notification-window", element: <NotificationWindow /> },
   { path: "/player-overlay", element: <PlayerOverlay /> },
-  // Fora do AppShell de propósito: player ocupa a janela inteira.
   { path: "/watch/:watchId/:episode", element: <Player /> },
 ]);
 

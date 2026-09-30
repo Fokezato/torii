@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 const API_URL: &str = "https://graphql.anilist.co";
 
 const MEDIA_FIELDS: &str = "id title { romaji english native } coverImage { extraLarge } bannerImage \
-episodes status genres averageScore duration description(asHtml: false) season seasonYear \
+episodes status format startDate { year month } genres averageScore duration description(asHtml: false) season seasonYear \
 studios(isMain: true) { nodes { name } } nextAiringEpisode { airingAt episode } \
 airingSchedule(notYetAired: true, perPage: 50) { nodes { airingAt episode } }";
 
@@ -45,14 +45,11 @@ pub struct AnimeSummary {
     pub description: Option<String>,
     pub season: Option<String>,
     pub season_year: Option<i32>,
+    pub format: Option<String>,
+    pub start_year: Option<i32>,
+    pub start_month: Option<i32>,
     pub next_airing_at: Option<i64>,
     pub next_airing_episode: Option<i32>,
-    /// Episódio que a AniList já sabe a data de exibição mas ainda não foi
-    /// ao ar — só os "próximos" (`airingSchedule(notYetAired: true)`), não
-    /// o histórico inteiro. Usado na Biblioteca pra mostrar "Disponível a
-    /// partir de DD/MM" no lugar de "Procurando" em placeholder de episódio
-    /// que fisicamente ainda não existe pra baixar (ver Torii issue: Slime
-    /// S4 com episódio futuro aparecendo como "procurando" sem sentido).
     pub upcoming_episodes: Vec<UpcomingEpisode>,
 }
 
@@ -83,6 +80,21 @@ struct PageData {
 #[derive(Deserialize)]
 struct PageMedia {
     media: Vec<RawMedia>,
+    #[serde(rename = "pageInfo")]
+    page_info: Option<RawPageInfo>,
+}
+
+#[derive(Deserialize)]
+struct RawPageInfo {
+    #[serde(rename = "hasNextPage")]
+    has_next_page: bool,
+    total: Option<i64>,
+}
+
+#[derive(Deserialize)]
+struct RawDate {
+    year: Option<i32>,
+    month: Option<i32>,
 }
 
 #[derive(Deserialize)]
@@ -105,6 +117,9 @@ struct RawMedia {
     season: Option<String>,
     #[serde(rename = "seasonYear")]
     season_year: Option<i32>,
+    format: Option<String>,
+    #[serde(rename = "startDate")]
+    start_date: Option<RawDate>,
     #[serde(rename = "nextAiringEpisode")]
     next_airing_episode: Option<RawAiring>,
     #[serde(rename = "airingSchedule")]
@@ -146,7 +161,6 @@ struct RawStudio {
     name: String,
 }
 
-/// Remove tags HTML simples que a AniList às vezes deixa na descrição mesmo com asHtml:false.
 fn strip_html(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     let mut in_tag = false;
@@ -183,6 +197,9 @@ impl From<RawMedia> for AnimeSummary {
             description: m.description.map(|d| strip_html(&d)).filter(|d| !d.is_empty()),
             season: m.season,
             season_year: m.season_year,
+            format: m.format,
+            start_year: m.start_date.as_ref().and_then(|d| d.year),
+            start_month: m.start_date.as_ref().and_then(|d| d.month),
             next_airing_at: m.next_airing_episode.as_ref().map(|a| a.airing_at),
             next_airing_episode: m.next_airing_episode.map(|a| a.episode),
             upcoming_episodes: m
@@ -198,7 +215,6 @@ impl From<RawMedia> for AnimeSummary {
     }
 }
 
-/// (season, year) no formato esperado pela AniList. Dezembro rola pro WINTER do ano seguinte.
 pub fn current_season_year() -> (&'static str, i32) {
     let now = Local::now();
     let month = now.month();
@@ -217,6 +233,14 @@ async fn graphql_query(
     query: &str,
     variables: serde_json::Value,
 ) -> Result<Vec<AnimeSummary>, String> {
+    graphql_page(client, query, variables).await.map(|(items, _, _)| items)
+}
+
+async fn graphql_page(
+    client: &reqwest::Client,
+    query: &str,
+    variables: serde_json::Value,
+) -> Result<(Vec<AnimeSummary>, bool, Option<i64>), String> {
     let body = serde_json::json!({ "query": query, "variables": variables });
     let resp = client
         .post(API_URL)
@@ -234,7 +258,66 @@ async fn graphql_query(
         return Err(msg);
     }
     let data = parsed.data.ok_or_else(|| tr!("resposta vazia da AniList", "empty response from AniList"))?;
-    Ok(data.page.media.into_iter().map(AnimeSummary::from).collect())
+    let has_next = data.page.page_info.as_ref().is_some_and(|p| p.has_next_page);
+    let total = data.page.page_info.and_then(|p| p.total);
+    Ok((data.page.media.into_iter().map(AnimeSummary::from).collect(), has_next, total))
+}
+
+const CATALOG_QUERY_PREFIX: &str = "query ($page: Int, $search: String, $genres: [String], $year: Int, $season: MediaSeason, $formats: [MediaFormat], $status: MediaStatus, $minScore: Int, $sort: [MediaSort]) { Page(page: $page, perPage: 30) { pageInfo { hasNextPage total } media(type: ANIME, isAdult: false, search: $search, genre_in: $genres, seasonYear: $year, season: $season, format_in: $formats, status: $status, averageScore_greater: $minScore, sort: $sort) { ";
+
+#[derive(Debug, Default, Deserialize)]
+pub struct CatalogFilter {
+    pub search: Option<String>,
+    #[serde(default)]
+    pub genres: Vec<String>,
+    pub year: Option<i32>,
+    pub season: Option<String>,
+    #[serde(default)]
+    pub formats: Vec<String>,
+    pub status: Option<String>,
+    pub min_score: Option<i32>,
+    pub sort: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CatalogPage {
+    pub items: Vec<AnimeSummary>,
+    pub has_next: bool,
+    pub total: Option<i64>,
+}
+
+pub async fn catalog(client: &reqwest::Client, filter: &CatalogFilter, page: i32) -> Result<CatalogPage, String> {
+    let search = filter.search.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let mut sort = vec![filter.sort.clone().unwrap_or_else(|| "POPULARITY_DESC".to_string())];
+    if search.is_some() {
+        sort.insert(0, "SEARCH_MATCH".to_string());
+    }
+    // AniList answers 500 to explicit nulls: only send the filters that are set.
+    let mut variables = serde_json::json!({ "page": page, "sort": sort });
+    let vars = variables.as_object_mut().unwrap();
+    if let Some(search) = search {
+        vars.insert("search".into(), search.into());
+    }
+    if !filter.genres.is_empty() {
+        vars.insert("genres".into(), filter.genres.clone().into());
+    }
+    if let Some(year) = filter.year {
+        vars.insert("year".into(), year.into());
+    }
+    if let Some(season) = &filter.season {
+        vars.insert("season".into(), season.clone().into());
+    }
+    if !filter.formats.is_empty() {
+        vars.insert("formats".into(), filter.formats.clone().into());
+    }
+    if let Some(status) = &filter.status {
+        vars.insert("status".into(), status.clone().into());
+    }
+    if let Some(min) = filter.min_score {
+        vars.insert("minScore".into(), min.into());
+    }
+    let (items, has_next, total) = graphql_page(client, &build_query(CATALOG_QUERY_PREFIX), variables).await?;
+    Ok(CatalogPage { items, has_next, total })
 }
 
 pub async fn browse_season(
@@ -271,9 +354,7 @@ pub async fn by_ids(client: &reqwest::Client, ids: &[i32]) -> Result<Vec<AnimeSu
 const RELATIONS_QUERY: &str = "query ($id: Int) { Media(id: $id, type: ANIME) { \
 relations { edges { relationType(version: 2) node { id type format } } } } }";
 
-/// Formatos que contam como "temporada" (filme/OVA/especial ficam de fora).
 const SEASON_FORMATS: [&str; 3] = ["TV", "TV_SHORT", "ONA"];
-/// Trava de segurança contra franquia gigante (ex. Gintama, Detective Conan).
 const MAX_FRANCHISE_SEASONS: usize = 20;
 
 #[derive(Deserialize)]
@@ -338,11 +419,6 @@ fn season_order(season: Option<&str>) -> u8 {
     }
 }
 
-/// Todas as temporadas (TV) do mesmo anime, em ordem de lançamento — segue
-/// as ligações de sequência/prequel da AniList a partir de qualquer
-/// temporada. A 1ª da lista é a "raiz" (vira o anime na Biblioteca). Não
-/// depende do título: "Demon Slayer ... Entertainment District Arc" não tem
-/// "Season 2" no nome e mesmo assim é achada como temporada 2.
 pub async fn franchise_seasons(client: &reqwest::Client, anilist_id: i32) -> Result<Vec<AnimeSummary>, String> {
     let mut seen = vec![anilist_id];
     let mut queue = std::collections::VecDeque::from([anilist_id]);
@@ -358,7 +434,6 @@ pub async fn franchise_seasons(client: &reqwest::Client, anilist_id: i32) -> Res
         }
     }
     let mut seasons = by_ids(client, &seen).await?;
-    // Sem ano (anunciado, sem data) vai pro fim.
     seasons.sort_by_key(|s| (s.season_year.unwrap_or(i32::MAX), season_order(s.season.as_deref())));
     Ok(seasons)
 }

@@ -31,8 +31,15 @@ pub async fn anilist_search(
     anilist::search(&state.http, &q).await.map_err(AppError::Fetch)
 }
 
-/// Todas as temporadas (TV) do anime, em ordem de lançamento — abas e
-/// "Baixar outra temporada" na página do anime na Biblioteca.
+#[tauri::command]
+pub async fn anilist_catalog(
+    state: State<'_, AppState>,
+    filter: anilist::CatalogFilter,
+    page: i32,
+) -> Result<anilist::CatalogPage, AppError> {
+    anilist::catalog(&state.http, &filter, page).await.map_err(AppError::Fetch)
+}
+
 #[tauri::command]
 pub async fn anime_seasons(
     state: State<'_, AppState>,
