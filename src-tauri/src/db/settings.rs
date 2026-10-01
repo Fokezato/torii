@@ -22,7 +22,6 @@ const DEFAULTS: &[(&str, &str)] = &[
     ("detect_segments", "1"),
     ("auto_update_check", "1"),
     ("delete_after_watched", "0"),
-    ("delete_after_watched_hours", "24"),
     ("strip_unused_audio", "0"),
     ("downscale_resolution", "original"),
     ("close_action", "tray"),

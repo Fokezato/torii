@@ -80,9 +80,6 @@ const en: Translation = {
   preferences: {
     streaming: "Streaming mode",
     streamingHint: "Downloads only when you press play and deletes after watching",
-    deleteAfterDays: "Delete after (days)",
-    never: "never",
-    deleteAfterDaysHint: "0 isn't allowed: it would delete the episode as soon as it's ready",
     notifyReady: "Notify when ready",
   },
   reduceSize: {
@@ -461,13 +458,9 @@ const en: Translation = {
     },
     notSet: "not set",
     change: "Change",
-    comingSoon: "Coming soon",
-    sent: "Sent",
     test: "Test",
     testing: "Testing...",
     duration: {
-      rightAfter: "Right away",
-      never: "Never",
       minutes_one: "{{count}} minute",
       minutes_other: "{{count}} minutes",
       hours_one: "{{count}} hour",
@@ -553,16 +546,8 @@ const en: Translation = {
       autoCheck: "Automatic check",
       checkEvery: "Check every",
       checkEveryHint: "Interval between searches for new episodes",
-      deleteAfter: "Delete after",
-      deleteAfterHint: "Global retention default",
       pause: "Pause automatic check",
       pauseHint: "No new episodes will be searched for",
-      cleanup: "Cleanup",
-      deleteWatched: "Delete after watching",
-      deleteWatchedHint:
-        "Removes the file on its own once you watch up to the ending. The episode isn't downloaded again.",
-      waitBeforeDelete: "Wait before deleting",
-      waitBeforeDeleteHint: "Time to rewatch before the file is gone",
       reduceIntro:
         "Turned on here, it applies to every anime. Turned off, you choose per anime: when adding (under Advanced) or in the anime's preferences in the Library.",
       noAudioLangs: "Set your preferred audio languages in Playback — without them no audio is removed.",
@@ -581,44 +566,30 @@ const en: Translation = {
       found: {
         label: "Episode found",
         description: "When a matching torrent is found and the download starts",
-        title: "New episode found",
-        body: "{{anime}} S03E11 — starting download",
       },
       calendar: {
         label: "Calendar premiere",
         description: "On the day a new episode airs, according to the calendar",
-        title: "Airs today",
-        body: "{{anime}} S03E12 airs today",
       },
       error: {
         label: "Download problem",
         description: "When a download fails",
-        title: "Download failed",
-        body: "Couldn't download {{anime}} S03E11",
       },
       complete: {
         label: "Download complete",
         description: "When the episode finishes downloading",
-        title: "Download complete",
-        body: "{{anime}} S03E11 is ready to watch",
       },
       jellyfin: {
         label: "Available on Jellyfin",
         description: "When the episode shows up in your Jellyfin library",
-        title: "Available on Jellyfin",
-        body: "{{anime}} S03E11",
       },
       watchReminder: {
         label: "Watch reminder",
         description: "Episode downloaded a while ago and not watched yet",
-        title: "Downloaded, not watched yet",
-        body: "{{anime}} S03E11 is waiting for you",
       },
       deleteReminder: {
         label: "Deletion reminder",
         description: "Warns before an episode is deleted by retention",
-        title: "Will be deleted soon",
-        body: "{{anime}} S03E11 will be removed in 2 days",
       },
     },
     about: {

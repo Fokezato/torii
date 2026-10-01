@@ -78,9 +78,6 @@ const ptBR = {
   preferences: {
     streaming: "Modo streaming",
     streamingHint: "Baixa só ao dar play e apaga depois de assistido",
-    deleteAfterDays: "Apagar após (dias)",
-    never: "nunca",
-    deleteAfterDaysHint: "0 não é permitido: apagaria o episódio assim que ficasse pronto",
     notifyReady: "Notificar quando pronto",
   },
   reduceSize: {
@@ -459,13 +456,9 @@ const ptBR = {
     },
     notSet: "não definido",
     change: "Alterar",
-    comingSoon: "Em breve",
-    sent: "Enviada",
     test: "Testar",
     testing: "Testando...",
     duration: {
-      rightAfter: "Logo depois",
-      never: "Nunca",
       minutes_one: "{{count}} minuto",
       minutes_other: "{{count}} minutos",
       hours_one: "{{count}} hora",
@@ -552,16 +545,8 @@ const ptBR = {
       autoCheck: "Checagem automática",
       checkEvery: "Checar a cada",
       checkEveryHint: "Intervalo entre buscas por novos episódios",
-      deleteAfter: "Apagar após",
-      deleteAfterHint: "Padrão global de retenção",
       pause: "Pausar checagem automática",
       pauseHint: "Nenhum novo episódio será buscado",
-      cleanup: "Limpeza",
-      deleteWatched: "Apagar depois de assistir",
-      deleteWatchedHint:
-        "Remove o arquivo sozinho depois que você assiste até o encerramento. O episódio não é baixado de novo.",
-      waitBeforeDelete: "Esperar antes de apagar",
-      waitBeforeDeleteHint: "Tempo pra rever antes do arquivo sumir",
       reduceIntro:
         "Ligado aqui, vale pra todos os animes. Desligado, você escolhe por anime: ao adicionar (em Avançado) ou nas preferências do anime na Biblioteca.",
       noAudioLangs: "Configure os idiomas de áudio preferidos em Reprodução — sem eles nenhum áudio é removido.",
@@ -580,44 +565,30 @@ const ptBR = {
       found: {
         label: "Episódio encontrado",
         description: "Quando o motor acha um torrent compatível e começa a baixar",
-        title: "Novo episódio encontrado",
-        body: "{{anime}} S03E11 — iniciando download",
       },
       calendar: {
         label: "Estreia do calendário",
         description: "No dia em que um episódio novo estreia, segundo o calendário",
-        title: "Estreia hoje",
-        body: "{{anime}} S03E12 estreia hoje",
       },
       error: {
         label: "Problema no download",
         description: "Quando um download falha",
-        title: "Falha no download",
-        body: "Não foi possível baixar {{anime}} S03E11",
       },
       complete: {
         label: "Download concluído",
         description: "Quando o episódio termina de baixar",
-        title: "Download concluído",
-        body: "{{anime}} S03E11 já está pronto pra assistir",
       },
       jellyfin: {
         label: "Disponível no Jellyfin",
         description: "Quando o episódio aparece na sua biblioteca Jellyfin",
-        title: "Disponível no Jellyfin",
-        body: "{{anime}} S03E11",
       },
       watchReminder: {
         label: "Lembrete pra assistir",
         description: "Episódio baixado há um tempo e ainda não foi assistido",
-        title: "Já baixou, falta assistir",
-        body: "{{anime}} S03E11 tá esperando você",
       },
       deleteReminder: {
         label: "Lembrete de exclusão",
         description: "Avisa antes de um episódio ser apagado pela retenção",
-        title: "Vai ser apagado em breve",
-        body: "{{anime}} S03E11 será removido em 2 dias",
       },
     },
     about: {

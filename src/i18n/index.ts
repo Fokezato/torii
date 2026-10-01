@@ -7,7 +7,7 @@ import en from "./en";
 
 export type AppLanguage = "pt-BR" | "en";
 
-export function resolveLanguage(setting?: string | null): AppLanguage {
+function resolveLanguage(setting?: string | null): AppLanguage {
   if (setting === "pt-BR" || setting === "en") return setting;
   return navigator.language.toLowerCase().startsWith("pt") ? "pt-BR" : "en";
 }

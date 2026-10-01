@@ -6,7 +6,7 @@ const SXXEYY = /S(\d{1,2})E(\d{1,3})/i;
 const DASH_EPISODE = /\s-\s(\d{1,4})(?:v\d)?(?=\s*[[(]|\s*$)/;
 const VIDEO_EXTENSIONS = /\.(mkv|mp4|avi|webm|mov|m4v|wmv|flv|ts)$/i;
 
-export function stripFileExtension(filename: string): string {
+function stripFileExtension(filename: string): string {
   return filename.replace(VIDEO_EXTENSIONS, "");
 }
 
@@ -16,43 +16,12 @@ export function parseEpisodeLabel(rawName: string | null, episodeNumber?: number
   return number != null ? t("labels.episode", { number }) : stripFileExtension(rawName);
 }
 
-export function parseFilenameTitleAndEpisode(rawFilename: string): { title: string; episodeLabel: string } {
-  const clean = stripFileExtension(rawFilename);
-  const match = clean.match(SXXEYY);
-  if (!match || match.index == null) {
-    return { title: clean.trim(), episodeLabel: "" };
-  }
-  const title = clean
-    .slice(0, match.index)
-    .replace(/^(?:\s*[[(][^\])]*[\])])+\s*/, "")
-    .replace(/[-_[(]+$/, "")
-    .trim();
-  const episodeNumber = parseInt(match[2], 10);
-  const rest = clean
-    .slice(match.index + match[0].length)
-    .replace(/[[({].*$/, "")
-    .replace(/^[\s._-]+|[\s._-]+$/g, "")
-    .trim();
-  return {
-    title: title || clean.trim(),
-    episodeLabel: rest
-      ? t("labels.episodeWithTitle", { number: episodeNumber, title: rest })
-      : t("labels.episode", { number: episodeNumber }),
-  };
-}
-
 export function parseEpisodeNumber(rawName: string | null): number | null {
   if (!rawName) return null;
   const match = rawName.match(SXXEYY);
   if (match) return parseInt(match[2], 10);
   const dashed = rawName.match(DASH_EPISODE);
   return dashed ? parseInt(dashed[1], 10) : null;
-}
-
-export function parseSeasonFromEpisodeName(rawName: string | null): number | null {
-  if (!rawName) return null;
-  const match = rawName.match(SXXEYY);
-  return match ? parseInt(match[1], 10) : null;
 }
 
 export function parseSeasonFromTitle(title: string | null): number | null {

@@ -91,10 +91,6 @@ export async function downloadMissingEpisodes(watchId: number): Promise<number> 
   return invoke<number>("download_missing_episodes", { watchId });
 }
 
-export async function episodeStreamUrl(episodeId: number): Promise<string> {
-  return invoke<string>("episode_stream_url", { episodeId });
-}
-
 export async function episodeStreamStart(episodeId: number): Promise<string> {
   return invoke<string>("episode_stream_start", { episodeId });
 }

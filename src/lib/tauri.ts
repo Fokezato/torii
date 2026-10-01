@@ -1,9 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export async function pingBackend(): Promise<string> {
-  return invoke<string>("greet", { name: "Torii" });
-}
-
 export async function getSettings(): Promise<Record<string, string>> {
   return invoke<Record<string, string>>("get_settings");
 }

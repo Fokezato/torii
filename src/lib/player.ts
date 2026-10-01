@@ -65,10 +65,6 @@ export async function playerOpen(
   return invoke("player_open", { source, title, episodeLabel, watchId, episodeNumber, startMs });
 }
 
-export async function playerPlay(): Promise<void> {
-  return invoke("player_play");
-}
-
 export async function playerSetPaused(paused: boolean): Promise<void> {
   return invoke("player_set_paused", { paused });
 }
@@ -107,14 +103,6 @@ export async function playerSetSubtitleTrack(id: number): Promise<void> {
 
 export async function playerSnapshot(): Promise<PlayerSnapshot> {
   return invoke("player_snapshot");
-}
-
-export async function playerResize(x: number, y: number, width: number, height: number): Promise<void> {
-  return invoke("player_resize", { x, y, width, height });
-}
-
-export async function playerSetVisible(visible: boolean): Promise<void> {
-  return invoke("player_set_visible", { visible });
 }
 
 export async function playerBringToFront(): Promise<void> {

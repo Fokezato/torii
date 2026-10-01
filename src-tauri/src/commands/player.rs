@@ -76,11 +76,6 @@ pub fn player_open(
 }
 
 #[tauri::command]
-pub fn player_play(state: State<'_, PlayerState>) -> Result<(), AppError> {
-    with_engine(&state, |e| e.play())
-}
-
-#[tauri::command]
 pub fn player_set_paused(state: State<'_, PlayerState>, paused: bool) -> Result<(), AppError> {
     with_engine(&state, |e| e.set_paused(paused))?;
     #[cfg(any(windows, target_os = "linux"))]
@@ -310,13 +305,6 @@ async fn aniskip_segments(
         }
         Err(_) => Ok(fallback),
     }
-}
-
-#[tauri::command]
-pub fn player_resize(state: State<'_, PlayerState>, x: i32, y: i32, width: i32, height: i32) -> Result<(), AppError> {
-    with_engine(&state, |e| {
-        crate::player::window::resize(e.surface(), x, y, width, height);
-    })
 }
 
 #[tauri::command]
