@@ -88,11 +88,6 @@ fn spawn_player_overlay_window(app: &tauri::App, main: &tauri::WebviewWindow) ->
     Ok(())
 }
 
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // libVLC can only embed into X11 windows; run under XWayland on Wayland.
@@ -156,7 +151,7 @@ pub fn run() {
                 Ok(server) => {
                     app.manage(server);
                 }
-                Err(e) => eprintln!("[stream] não iniciou: {e}"),
+                Err(e) => eprintln!("[stream] failed to start: {e}"),
             }
 
             tauri::async_runtime::spawn(engine::backfill_placeholder_episodes(app.handle().clone()));
@@ -275,7 +270,7 @@ pub fn run() {
                     Ok(session) => {
                         *app.state::<player::PlayerState>().media_session.lock().unwrap() = Some(session);
                     }
-                    Err(e) => eprintln!("[player] controle de mídia (MPRIS) indisponível: {e}"),
+                    Err(e) => eprintln!("[player] MPRIS media controls unavailable: {e}"),
                 }
                 #[cfg(windows)]
                 if let Ok(main_hwnd) = window.hwnd() {
@@ -283,7 +278,7 @@ pub fn run() {
                         Ok(session) => {
                             *app.state::<player::PlayerState>().media_session.lock().unwrap() = Some(session);
                         }
-                        Err(e) => eprintln!("[player] controle de mídia do Windows indisponível: {e}"),
+                        Err(e) => eprintln!("[player] Windows media controls unavailable: {e}"),
                     }
                 }
 
@@ -297,15 +292,15 @@ pub fn run() {
                                     .store(player::window::to_raw(child), std::sync::atomic::Ordering::Relaxed);
                                 *state.engine.lock().unwrap() = Some(engine);
                             }
-                            Err(e) => eprintln!("[player] falha ao iniciar libvlc: {e}"),
+                            Err(e) => eprintln!("[player] failed to start libvlc: {e}"),
                         },
-                        Err(e) => eprintln!("[player] falha ao criar child window: {e}"),
+                        Err(e) => eprintln!("[player] failed to create the video window: {e}"),
                     },
-                    None => eprintln!("[player] janela principal sem handle nativo (Wayland puro?)"),
+                    None => eprintln!("[player] main window has no native handle (pure Wayland?)"),
                 }
 
                 if let Err(e) = spawn_player_overlay_window(app, &window) {
-                    eprintln!("[player] falha ao criar janela de overlay: {e}");
+                    eprintln!("[player] failed to create the overlay window: {e}");
                 }
             }
 
@@ -314,7 +309,6 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            greet,
             commands::settings::get_settings,
             commands::settings::update_settings,
             commands::season::browse_season,
@@ -332,7 +326,6 @@ pub fn run() {
             commands::watches::set_watch_list_status,
             commands::watches::set_watch_preferences,
             commands::stats::get_storage_stats,
-            commands::nyaa::nyaa_search,
             commands::nyaa::nyaa_available_languages,
             commands::activity::get_activity_log,
             commands::episodes::list_recent_episodes,
@@ -350,7 +343,6 @@ pub fn run() {
             commands::episodes::switch_episode_source,
             commands::episodes::force_check_episode,
             commands::player::player_open,
-            commands::player::player_play,
             commands::player::player_set_paused,
             commands::player::player_stop,
             commands::player::player_seek,
@@ -361,7 +353,6 @@ pub fn run() {
             commands::player::player_list_subtitle_tracks,
             commands::player::player_set_subtitle_track,
             commands::player::player_snapshot,
-            commands::player::player_resize,
             commands::player::player_bring_to_front,
             commands::player::player_set_visible,
             commands::player::player_set_video_area,

@@ -123,7 +123,7 @@ pub struct VlcApi {
 
 macro_rules! sym {
     ($lib:expr, $name:literal) => {{
-        let s: Symbol<'_, _> = $lib.get($name).map_err(|e| format!("símbolo {} não achado: {e}", stringify!($name)))?;
+        let s: Symbol<'_, _> = $lib.get($name).map_err(|e| format!("symbol {} not found: {e}", stringify!($name)))?;
         *s
     }};
 }

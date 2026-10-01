@@ -64,11 +64,11 @@ fn load_libvlc() -> Result<(Library, Vec<CString>), String> {
     let exe_dir = std::env::current_exe()
         .map_err(|e| e.to_string())?
         .parent()
-        .ok_or_else(|| "sem diretório pai do executável".to_string())?
+        .ok_or_else(|| "executable has no parent directory".to_string())?
         .to_path_buf();
     let dll_path = exe_dir.join("libvlc.dll");
     let lib = unsafe { Library::new(&dll_path) }
-        .map_err(|e| format!("falha ao carregar libvlc.dll em {}: {e}", dll_path.display()))?;
+        .map_err(|e| format!("failed to load libvlc.dll from {}: {e}", dll_path.display()))?;
     let plugin_arg = CString::new(format!("--plugin-path={}", exe_dir.join("plugins").display()))
         .map_err(|e| e.to_string())?;
     Ok((lib, vec![plugin_arg, CString::new("--quiet").unwrap()]))
@@ -77,7 +77,7 @@ fn load_libvlc() -> Result<(Library, Vec<CString>), String> {
 #[cfg(not(windows))]
 fn load_libvlc() -> Result<(Library, Vec<CString>), String> {
     let lib = unsafe { Library::new("libvlc.so.5") }.map_err(|e| {
-        format!("libVLC não encontrado ({e}) — instale o VLC pelo gerenciador de pacotes")
+        tr!("libVLC não encontrado ({e}) — instale o VLC pelo gerenciador de pacotes", "libVLC not found ({e}) — install VLC with your package manager")
     })?;
     Ok((lib, vec![CString::new("--quiet").unwrap(), CString::new("--no-xlib").unwrap()]))
 }

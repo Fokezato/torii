@@ -28,10 +28,10 @@ pub async fn test_connection(
         .map_err(|e| tr!("não deu pra conectar: {e}", "couldn't connect: {e}"))?;
 
     if !resp.status().is_success() {
-        return Err(format!("Jellyfin respondeu {}", resp.status()));
+        return Err(tr!("Jellyfin respondeu {}", "Jellyfin answered {}", resp.status()));
     }
 
-    let info: SystemInfo = resp.json().await.map_err(|e| format!("resposta inesperada: {e}"))?;
+    let info: SystemInfo = resp.json().await.map_err(|e| tr!("resposta inesperada: {e}", "unexpected response: {e}"))?;
     Ok(ConnectionInfo {
         server_name: info.server_name.unwrap_or_else(|| "Jellyfin".to_string()),
         version: info.version.unwrap_or_default(),
@@ -56,7 +56,7 @@ pub async fn refresh_path(
         .await
         .map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
-        return Err(format!("Jellyfin respondeu {} ao pedir refresh", resp.status()));
+        return Err(tr!("Jellyfin respondeu {} ao pedir refresh", "Jellyfin answered {} to the refresh", resp.status()));
     }
     Ok(())
 }
@@ -129,7 +129,7 @@ pub async fn delete_item(
         .await
         .map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
-        return Err(format!("Jellyfin respondeu {} ao apagar item", resp.status()));
+        return Err(tr!("Jellyfin respondeu {} ao apagar item", "Jellyfin answered {} when deleting the item", resp.status()));
     }
     Ok(())
 }

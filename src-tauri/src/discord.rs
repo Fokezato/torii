@@ -135,7 +135,7 @@ fn run(rx: std::sync::mpsc::Receiver<Msg>) {
             last_attempt = Some(Instant::now());
             let mut c = DiscordIpcClient::new(CLIENT_ID);
             if let Err(e) = c.connect() {
-                eprintln!("[discord] sem conexão: {e}");
+                eprintln!("[discord] not connected: {e}");
                 continue;
             }
             eprintln!("[discord] conectado");
@@ -159,7 +159,7 @@ fn run(rx: std::sync::mpsc::Receiver<Msg>) {
                 dirty = false;
             }
             Err(e) => {
-                eprintln!("[discord] erro ao enviar: {e}");
+                eprintln!("[discord] send failed: {e}");
                 let _ = c.close();
                 client = None;
                 dirty = true;

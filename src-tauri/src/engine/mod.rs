@@ -258,7 +258,7 @@ pub async fn poll_watch(app: &AppHandle, state: &AppState, watch: &db::watches::
     let seen_ids = match db::seen_items::get_seen_ids(&state.db, watch.id).await {
         Ok(ids) => ids,
         Err(e) => {
-            state.activity.error(format!("Erro ao checar \"{}\": {e}", watch.title));
+            state.activity.error(tr!("Erro ao checar \"{}\": {e}", "Failed to check \"{}\": {e}", watch.title));
             return;
         }
     };
@@ -282,7 +282,7 @@ pub async fn poll_watch(app: &AppHandle, state: &AppState, watch: &db::watches::
     let result = match result {
         Ok(r) => r,
         Err(e) => {
-            state.activity.error(format!("Falha ao procurar \"{}\": {e}", watch.title));
+            state.activity.error(tr!("Falha ao procurar \"{}\": {e}", "Search failed for \"{}\": {e}", watch.title));
             return;
         }
     };
@@ -441,7 +441,7 @@ pub async fn resume_pending_downloads(app: AppHandle) {
         let (Some(magnet), Some(save_path)) = (ep.magnet_uri.as_deref(), ep.save_path.as_deref()) else {
             continue;
         };
-        let title = ep.name.as_deref().unwrap_or("episódio");
+        let title = ep.name.as_deref().unwrap_or("episode");
         let Ok(watch) = db::watches::get(&state.db, ep.watch_id).await else {
             continue;
         };
@@ -488,7 +488,7 @@ async fn rename_to_clean_filename(state: &AppState, episode_id: i64, watch_id: i
             Some(new_path)
         }
         Err(e) => {
-            state.activity.error(format!("Erro ao renomear arquivo baixado: {e}"));
+            state.activity.error(tr!("Erro ao renomear arquivo baixado: {e}", "Failed to rename the downloaded file: {e}"));
             Some(old_path)
         }
     }
@@ -515,7 +515,7 @@ async fn sync_jellyfin_after_download(app: AppHandle, episode_id: i64, file_path
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
     if let Err(e) = jellyfin::refresh_path(&state.http, url, api_key, &parent).await {
-        state.activity.error(format!("Erro ao pedir refresh ao Jellyfin: {e}"));
+        state.activity.error(tr!("Erro ao pedir refresh ao Jellyfin: {e}", "Failed to ask Jellyfin to refresh: {e}"));
         return;
     }
 
@@ -544,7 +544,7 @@ async fn sync_jellyfin_after_download(app: AppHandle, episode_id: i64, file_path
             state.activity.error(tr!("Jellyfin não achou o episódio depois do refresh", "Jellyfin didn't find the episode after the refresh"));
         }
         Err(e) => {
-            state.activity.error(format!("Erro ao consultar Jellyfin: {e}"));
+            state.activity.error(tr!("Erro ao consultar Jellyfin: {e}", "Failed to query Jellyfin: {e}"));
         }
     }
 }
@@ -632,7 +632,7 @@ pub async fn start_stream(app: &AppHandle, state: &AppState, episode_id: i64) ->
         .flatten();
     match known_source {
         Some(magnet) => {
-            let title = episode.name.as_deref().unwrap_or("episódio");
+            let title = episode.name.as_deref().unwrap_or("episode");
             start_download(
                 app,
                 state,
@@ -919,7 +919,7 @@ async fn remove_episode(
     }
 
     if let Err(e) = db::episodes::mark_deleted(&state.db, ep.id).await {
-        state.activity.error(format!("Erro ao marcar \"{clean_title}\" como removido: {e}"));
+        state.activity.error(tr!("Erro ao marcar \"{clean_title}\" como removido: {e}", "Failed to mark \"{clean_title}\" as removed: {e}"));
         return false;
     }
     true

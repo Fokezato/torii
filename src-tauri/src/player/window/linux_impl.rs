@@ -45,7 +45,7 @@ pub fn create_child(parent: Surface) -> Result<Surface, String> {
         xlib::XCreateSimpleWindow(d, parent as xlib::Window, 0, 0, 1, 1, 0, black, black) as Surface
     })
     .filter(|w| *w != 0)
-    .ok_or_else(|| "não foi possível criar a janela X11 do vídeo".to_string())
+    .ok_or_else(|| "could not create the X11 video window".to_string())
 }
 
 pub fn resize(surface: Surface, x: i32, y: i32, width: i32, height: i32) {

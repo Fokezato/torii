@@ -139,7 +139,7 @@ async fn download_and_extract(app: &AppHandle, http: &reqwest::Client) -> Result
         .send()
         .await
         .and_then(|r| r.error_for_status())
-        .map_err(|e| format!("falha ao baixar ffmpeg: {e}"))?;
+        .map_err(|e| tr!("falha ao baixar ffmpeg: {e}", "failed to download ffmpeg: {e}"))?;
     let total = resp.content_length().unwrap_or(0);
     let mut file = tokio::fs::File::create(&zip_path).await.map_err(|e| e.to_string())?;
     let mut hasher = Sha256::new();
