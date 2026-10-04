@@ -325,16 +325,26 @@ pub fn matches_quality(title: &str, quality: &str) -> bool {
     Regex::new(&pattern).map(|r| r.is_match(title)).unwrap_or(true)
 }
 
+/// Release page text and magnet. Errors (including Nyaa's rate limiting) are reported
+/// as such, never as an empty description: that would read as "language missing".
 async fn fetch_detail(client: &reqwest::Client, view_url: &str) -> Result<(String, Option<String>), String> {
-    let html = client
-        .get(view_url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?
-        .text()
-        .await
-        .map_err(|e| e.to_string())?;
+    let mut attempt = 0;
+    let html = loop {
+        let resp = client.get(view_url).send().await.map_err(|e| e.to_string())?;
+        let status = resp.status();
+        if status.is_success() {
+            break resp.text().await.map_err(|e| e.to_string())?;
+        }
+        attempt += 1;
+        if attempt >= 3 || !(status.as_u16() == 429 || status.is_server_error()) {
+            return Err(format!("nyaa {status}"));
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(2 * attempt)).await;
+    };
     let doc = Html::parse_document(&html);
+    if doc.select(&Selector::parse("#torrent-description").unwrap()).next().is_none() {
+        return Err("nyaa: unexpected page".into());
+    }
 
     let desc_sel = Selector::parse("#torrent-description").unwrap();
     let line_sel = Selector::parse("#torrent-description li, #torrent-description p").unwrap();
@@ -661,31 +671,33 @@ pub async fn find_new_matches(
     let audio_langs = audio_langs.to_vec();
     let sub_langs = sub_langs.to_vec();
 
-    let matched: Vec<NyaaCandidate> = stream::iter(new_candidates.clone())
+    // Ok(Some) = language matches, Ok(None) = it doesn't, Err = page couldn't be read.
+    let checked: Vec<Result<Option<NyaaCandidate>, String>> = stream::iter(new_candidates.clone())
         .map(|mut candidate| {
             let client = client.clone();
             let audio_langs = audio_langs.clone();
             let sub_langs = sub_langs.clone();
             async move {
-                match fetch_detail(&client, &candidate.view_url).await {
-                    Ok((description, real_magnet)) => {
-                        if let Some(m) = real_magnet {
-                            candidate.magnet = m;
-                        }
-                        matches_language(&description, &candidate.title, &audio_langs, &sub_langs)
-                            .then_some(candidate)
-                    }
-                    Err(_) => None,
+                let (description, real_magnet) = fetch_detail(&client, &candidate.view_url)
+                    .await
+                    .map_err(|_| candidate.id.clone())?;
+                if let Some(m) = real_magnet {
+                    candidate.magnet = m;
                 }
+                Ok(matches_language(&description, &candidate.title, &audio_langs, &sub_langs).then_some(candidate))
             }
         })
         .buffer_unordered(DETAIL_FETCH_CONCURRENCY)
-        .filter_map(|x| async move { x })
         .collect()
         .await;
 
-    rejected.language = new_candidates.len() - matched.len();
-    Ok(finish(matched, new_candidates, rejected))
+    // Releases that couldn't be checked are left out of `all_new`, so they are not
+    // marked as seen and get checked again on the next search.
+    let unchecked: HashSet<String> = checked.iter().filter_map(|r| r.as_ref().err().cloned()).collect();
+    let matched: Vec<NyaaCandidate> = checked.into_iter().filter_map(|r| r.ok().flatten()).collect();
+    let all_new: Vec<NyaaCandidate> = new_candidates.into_iter().filter(|c| !unchecked.contains(&c.id)).collect();
+    rejected.language = all_new.len() - matched.len();
+    Ok(finish(matched, all_new, rejected))
 }
 
 pub async fn find_best_for_episode(
