@@ -19,10 +19,12 @@ jobs:
       - name: Count installer downloads
         env:
           GH_TOKEN: ${{ github.token }}
+          # Installer downloads of releases 0.1-0.4, which were removed from GitHub.
+          ARCHIVED: 15
         run: |
           total=$(gh api --paginate "repos/${{ github.repository }}/releases" \
             --jq '[.[].assets[] | select(.name | test("[.](exe|AppImage|deb|rpm)$")) | .download_count] | add // 0' \
-            | awk '{s+=$1} END {print s+0}')
+            | awk -v base="$ARCHIVED" '{s+=$1} END {print s+base}')
           mkdir -p out
           printf '{"schemaVersion":1,"label":"downloads","message":"%s","color":"FF6A45"}\n' "$total" > out/downloads.json
           cat out/downloads.json
