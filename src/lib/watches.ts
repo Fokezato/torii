@@ -29,6 +29,8 @@ export interface Watch {
   streaming: boolean;
   /** null = follow the global setting. */
   delete_after_watched: boolean | null;
+  /** AniList format: TV, MOVIE, OVA... */
+  format: string | null;
 }
 
 export function seriesKeyOf(w: Watch): string {
@@ -88,6 +90,7 @@ export interface NewWatch {
   max_resolution?: string | null;
   strip_audio?: boolean | null;
   streaming?: boolean | null;
+  format?: string | null;
 }
 
 export async function listWatches(): Promise<Watch[]> {

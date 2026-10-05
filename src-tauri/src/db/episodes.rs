@@ -112,6 +112,11 @@ pub async fn set_episode_number(pool: &SqlitePool, id: i64, episode_number: i64)
     Ok(())
 }
 
+pub async fn delete_row(pool: &SqlitePool, id: i64) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM episodes WHERE id = ?").bind(id).execute(pool).await?;
+    Ok(())
+}
+
 pub async fn mark_pending(pool: &SqlitePool, id: i64) -> Result<(), sqlx::Error> {
     sqlx::query(
         "UPDATE episodes SET status = 'pending', source_item_id = NULL, name = NULL, \

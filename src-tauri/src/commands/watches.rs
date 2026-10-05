@@ -38,6 +38,11 @@ pub async fn create_watch(
             watch.series_title = Some(series_title);
         }
     }
+    if watch.format.as_deref() == Some("MOVIE") {
+        watch.episodes = Some(1);
+        watch.episode_start = None;
+        watch.episode_end = None;
+    }
     let settings = db::settings::get_all(&state.db).await?;
     let library_root = settings.get("library_root").cloned().unwrap_or_default();
     let created = db::watches::create(&state.db, &library_root, watch).await?;

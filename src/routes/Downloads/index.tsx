@@ -18,7 +18,7 @@ import {
   type Episode,
 } from "@/lib/episodes";
 import { listWatches } from "@/lib/watches";
-import { parseEpisodeLabel } from "@/lib/episodeName";
+import { parseEpisodeLabel, episodeLabelOf } from "@/lib/episodeName";
 
 const DISMISSED_STORAGE_KEY = "torii:dismissed-downloads";
 
@@ -138,6 +138,7 @@ function StatusBadge({ status, paused }: { status: Episode["status"]; paused: bo
 function EpisodeRow({
   episode,
   watchTitle,
+  watchFormat,
   coverUrl,
   progress,
   onPause,
@@ -148,6 +149,7 @@ function EpisodeRow({
 }: {
   episode: Episode;
   watchTitle: string;
+  watchFormat: string | null;
   coverUrl: string | null;
   progress: DownloadProgress | undefined;
   onPause: () => void;
@@ -185,7 +187,7 @@ function EpisodeRow({
           </span>
         </div>
         <p className="truncate text-[11px] text-[#6C7180]" title={episode.name ?? undefined}>
-          {parseEpisodeLabel(episode.name, episode.episode_number)}
+          {episodeLabelOf({ format: watchFormat }, episode.name, episode.episode_number)}
         </p>
 
         {isDownloading && (
@@ -468,8 +470,8 @@ export default function Downloads() {
   }, [queryClient]);
 
   const watchById = useMemo(() => {
-    const map = new Map<number, { title: string; cover_url: string | null }>();
-    for (const w of watches) map.set(w.id, { title: w.title, cover_url: w.cover_url });
+    const map = new Map<number, { title: string; cover_url: string | null; format: string | null }>();
+    for (const w of watches) map.set(w.id, { title: w.title, cover_url: w.cover_url, format: w.format });
     return map;
   }, [watches]);
 
@@ -593,7 +595,7 @@ export default function Downloads() {
           {rows.map(({ key, episodes: group }) => {
             const episode = group[0];
             const watch = watchById.get(episode.watch_id);
-            if (packKey(episode)) {
+            if (packKey(episode) && group.length > 1) {
               const active = group.find((e) => e.status === "downloading") ?? episode;
               return (
                 <PackRow
@@ -621,6 +623,7 @@ export default function Downloads() {
                 key={episode.id}
                 episode={episode}
                 watchTitle={watch?.title ?? "Anime"}
+                watchFormat={watch?.format ?? null}
                 coverUrl={watch?.cover_url ?? null}
                 progress={progressByEpisode[episode.id]}
                 onPause={() => pauseEpisodeDownload(episode.id)}

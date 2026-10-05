@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import { listAvailableEpisodes, type Episode } from "@/lib/episodes";
 import type { Watch, WatchGroup } from "@/lib/watches";
 import { episodeNumberOf, playEpisode } from "@/lib/continueWatching";
-import { formatPlayerTitle, parseEpisodeLabel, parseSeasonFromTitle } from "@/lib/episodeName";
+import { formatPlayerTitle, parseSeasonFromTitle, episodeLabelOf } from "@/lib/episodeName";
 import { mediaFrame, mediaProbe } from "@/lib/player";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 
@@ -89,7 +89,7 @@ function ContinueCard({ item }: { item: ContinueItem }) {
   const duration = probe?.duration_ms ?? 0;
   const progress = duration > 0 ? Math.min(1, position / duration) : 0;
   const minutesLeft = duration > 0 ? Math.max(1, Math.round((duration - position) / 60_000)) : null;
-  const rawLabel = parseEpisodeLabel(episode.name, episodeNumberOf(episode));
+  const rawLabel = episodeLabelOf(watch, episode.name, episodeNumberOf(episode));
   const { title, episodeLabel } = formatPlayerTitle(watch.title, rawLabel, watch.series_title);
   const image = frame ?? watch.cover_url;
 

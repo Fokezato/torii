@@ -16,6 +16,19 @@ export function parseEpisodeLabel(rawName: string | null, episodeNumber?: number
   return number != null ? t("labels.episode", { number }) : stripFileExtension(rawName);
 }
 
+export function isMovie(watch: { format?: string | null } | null | undefined): boolean {
+  return watch?.format === "MOVIE";
+}
+
+/** Like `parseEpisodeLabel`, but a movie's only episode reads "Movie". */
+export function episodeLabelOf(
+  watch: { format?: string | null } | null | undefined,
+  rawName: string | null,
+  episodeNumber?: number | null,
+): string {
+  return isMovie(watch) ? t("labels.movie") : parseEpisodeLabel(rawName, episodeNumber);
+}
+
 export function parseEpisodeNumber(rawName: string | null): number | null {
   if (!rawName) return null;
   const match = rawName.match(SXXEYY);

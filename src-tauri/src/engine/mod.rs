@@ -110,6 +110,9 @@ fn nothing_matching(
             rejected.other_work
         ));
     }
+    if rejected.not_movie > 0 {
+        reasons.push(tr!("{} de episódios, não do filme", "{} of episodes, not the movie", rejected.not_movie));
+    }
     if rejected.quality > 0 {
         reasons.push(tr!("{} em outra qualidade", "{} in another quality", rejected.quality));
     }
@@ -155,6 +158,85 @@ async fn retry_pack_errors(app: &AppHandle, state: &AppState, watch: &db::watche
         )
         .await;
     }
+}
+
+/// A movie keeps a single episode, number 1. Releases picked up before the watch was
+/// known to be a movie may sit under another number ("S00E16").
+async fn normalize_movie_episodes(state: &AppState, watch: &db::watches::Watch) {
+    let Ok(episodes) = db::episodes::list_for_watch(&state.db, watch.id).await else { return };
+    let rank = |status: &str| match status {
+        "available" => 0,
+        "downloading" => 1,
+        "ready" | "found" => 2,
+        "error" => 3,
+        "deleted" => 4,
+        _ => 5,
+    };
+    let Some(keep) = episodes.iter().min_by_key(|e| (rank(&e.status), e.episode_number != Some(1))) else { return };
+    for ep in episodes.iter().filter(|e| e.id != keep.id && e.status == "pending") {
+        let _ = db::episodes::delete_row(&state.db, ep.id).await;
+    }
+    if keep.episode_number != Some(1) && !episodes.iter().any(|e| e.id != keep.id && e.status != "pending" && e.episode_number == Some(1)) {
+        let _ = db::episodes::set_episode_number(&state.db, keep.id, 1).await;
+    }
+}
+
+/// Movies: the release with the most seeders gives the movie's file to episode 1.
+async fn assign_movie(app: &AppHandle, state: &AppState, watch: &db::watches::Watch, releases: &[nyaa::NyaaCandidate]) -> u32 {
+    const MAX_TRIES: usize = 3;
+    let Ok(episodes) = db::episodes::list_for_watch(&state.db, watch.id).await else { return 0 };
+    let Some(episode) = episodes
+        .into_iter()
+        .find(|e| e.episode_number.unwrap_or(1) == 1 && matches!(e.status.as_str(), "pending" | "error"))
+    else {
+        return 0;
+    };
+
+    let mut releases: Vec<&nyaa::NyaaCandidate> = releases.iter().collect();
+    releases.sort_by_key(|r| std::cmp::Reverse(r.seeders.unwrap_or(0)));
+    for release in releases.into_iter().take(MAX_TRIES) {
+        let files = match state.torrent.list_files(&release.magnet).await {
+            Ok(files) => files,
+            Err(e) => {
+                state.activity.info(tr!("Release sem resposta ({}): {e}", "Release not responding ({}): {e}", release.title));
+                continue;
+            }
+        };
+        let Some(file) = nyaa::movie_file(&files) else {
+            let _ = db::seen_items::mark_seen(&state.db, watch.id, &release.id, &release.title, false).await;
+            continue;
+        };
+        let _ = db::seen_items::mark_seen(&state.db, watch.id, &release.id, &release.title, true).await;
+        let name = file.path.rsplit(['/', '\\']).next().unwrap_or(&release.title).to_string();
+        if db::episodes::switch_source(&state.db, episode.id, &release.id, &name, &release.magnet).await.is_err() {
+            return 0;
+        }
+        let _ = db::episodes::set_file_index(&state.db, episode.id, Some(file.index as i64)).await;
+        let _ = db::episode_sources::add_pack_source(&state.db, episode.id, release, file.index as i64).await;
+        let _ = db::episode_sources::set_active(&state.db, episode.id, &release.id).await;
+        state.activity.info(tr!("Filme encontrado: {}", "Movie found: {}", release.title));
+        if watch.streaming {
+            let _ = db::episodes::mark_ready(&state.db, episode.id).await;
+        } else {
+            start_download(app, state, episode.id, &watch.title, &name, &release.magnet, &watch.folder, watch.cover_url.clone(), false, Some(file.index)).await;
+        }
+        notify::notify(
+            app,
+            state,
+            "notify_found",
+            tr!("Filme encontrado", "Movie found"),
+            if watch.streaming {
+                tr!("{} — pronto pra assistir", "{} — ready to watch", watch.title)
+            } else {
+                tr!("{} — iniciando download", "{} — starting download", watch.title)
+            },
+            "info",
+            watch.cover_url.clone(),
+        )
+        .await;
+        return 1;
+    }
+    0
 }
 
 /// Season packs: episodes still missing get their file from a pack (best seeded first).
@@ -252,6 +334,9 @@ async fn assign_packs(
 }
 
 pub async fn poll_watch(app: &AppHandle, state: &AppState, watch: &db::watches::Watch) {
+    if watch.is_movie() {
+        normalize_movie_episodes(state, watch).await;
+    }
     let audio_langs = split_langs(&watch.audio_lang);
     let sub_langs = split_langs(&watch.sub_lang);
 
@@ -276,6 +361,7 @@ pub async fn poll_watch(app: &AppHandle, state: &AppState, watch: &db::watches::
         watch.episode_start,
         watch.episode_end,
         &seen_ids,
+        watch.is_movie(),
     )
     .await;
 
@@ -398,7 +484,11 @@ pub async fn poll_watch(app: &AppHandle, state: &AppState, watch: &db::watches::
     }
 
     retry_pack_errors(app, state, watch).await;
-    let from_packs = assign_packs(app, state, watch, &result.batches, &names).await;
+    let from_packs = if watch.is_movie() {
+        assign_movie(app, state, watch, &result.batches).await
+    } else {
+        assign_packs(app, state, watch, &result.batches, &names).await
+    };
     started += from_packs;
     if result.matched.is_empty() && from_packs == 0 && !result.all_new.is_empty() {
         state.activity.info(nothing_matching(watch, &result.rejected, &audio_langs, &sub_langs));
@@ -575,6 +665,19 @@ pub async fn force_download_episode(
     use crate::error::AppError;
     let episode = db::episodes::get(&state.db, episode_id).await?;
     let watch = db::watches::get(&state.db, episode.watch_id).await?;
+    if watch.is_movie() {
+        match episode.status.as_str() {
+            "pending" | "error" => db::seen_items::forget_rejected(&state.db, watch.id).await?,
+            "deleted" => {
+                db::episodes::mark_pending(&state.db, episode_id).await?;
+                db::seen_items::forget_all(&state.db, watch.id).await?;
+            }
+            _ => return Ok(false),
+        }
+        poll_watch(app, state, &watch).await;
+        let after = db::episodes::get(&state.db, episode_id).await?;
+        return Ok(after.status != "pending" && after.status != "error");
+    }
     let Some(episode_number) = episode
         .episode_number
         .or_else(|| episode.name.as_deref().and_then(crate::sources::nyaa::extract_episode_number).map(i64::from))
@@ -1173,6 +1276,23 @@ pub async fn backfill_series(app: AppHandle) {
     let Ok(watches) = db::watches::list(&state.db).await else {
         return;
     };
+    let missing: Vec<i32> = watches
+        .iter()
+        .filter(|w| w.format.is_none())
+        .filter_map(|w| w.anilist_id.map(|id| id as i32))
+        .collect();
+    for chunk in missing.chunks(50) {
+        let Ok(found) = crate::sources::anilist::by_ids(&state.http, chunk).await else { break };
+        for anime in found {
+            let Some(format) = anime.format.as_deref() else { continue };
+            for w in watches.iter().filter(|w| w.anilist_id == Some(anime.anilist_id as i64)) {
+                let _ = db::watches::set_format(&state.db, w.id, format).await;
+                if format == "MOVIE" && w.episodes.is_none() {
+                    let _ = db::episodes::create_placeholder(&state.db, w.id, &w.folder, 1).await;
+                }
+            }
+        }
+    }
     for watch in watches.into_iter().filter(|w| w.series_anilist_id.is_none()) {
         let Some(anilist_id) = watch.anilist_id else { continue };
         if let Some((series_id, series_title)) =

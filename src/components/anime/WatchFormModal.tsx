@@ -104,6 +104,7 @@ export function WatchFormModal({ anime, onOpenChange }: WatchFormModalProps) {
         cover_url: anime!.cover_url,
         status: anime!.status,
         episodes: anime!.episodes,
+        format: anime!.format,
         active: tab === "streaming" ? true : autoDownload,
         streaming: tab === "streaming",
         notify_on_available: notify,
@@ -245,27 +246,31 @@ export function WatchFormModal({ anime, onOpenChange }: WatchFormModalProps) {
 
                   {advancedOpen && (
                     <div className="flex flex-col gap-3">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[13px] font-semibold">{t("addAnime.whichEpisodes")}</span>
-                        <span className="text-[12px] font-semibold text-primary">
-                          {rangeIsFull
-                            ? t("addAnime.allEpisodes")
-                            : t("addAnime.episodeRange", { from: episodeRange[0], to: episodeRange[1] })}
-                        </span>
-                      </div>
-                      <span className="text-[11.5px] text-[#6C7180]">{t("addAnime.rangeHint")}</span>
-                      <Slider
-                        min={1}
-                        max={totalEpisodes}
-                        step={1}
-                        value={episodeRange}
-                        onValueChange={(v) => setEpisodeRange([v[0], v[1]])}
-                        className="py-1.5"
-                      />
-                      <div className="flex items-center justify-between text-[11px] text-[#6C7180]">
-                        <span>{t("common.episodeShort", { number: 1 })}</span>
-                        <span>{t("common.episodeShort", { number: totalEpisodes })}</span>
-                      </div>
+                      {anime?.format !== "MOVIE" && (
+                        <>
+                        <div className="flex items-center justify-between">
+                          <span className="text-[13px] font-semibold">{t("addAnime.whichEpisodes")}</span>
+                          <span className="text-[12px] font-semibold text-primary">
+                            {rangeIsFull
+                              ? t("addAnime.allEpisodes")
+                              : t("addAnime.episodeRange", { from: episodeRange[0], to: episodeRange[1] })}
+                          </span>
+                        </div>
+                        <span className="text-[11.5px] text-[#6C7180]">{t("addAnime.rangeHint")}</span>
+                        <Slider
+                          min={1}
+                          max={totalEpisodes}
+                          step={1}
+                          value={episodeRange}
+                          onValueChange={(v) => setEpisodeRange([v[0], v[1]])}
+                          className="py-1.5"
+                        />
+                        <div className="flex items-center justify-between text-[11px] text-[#6C7180]">
+                          <span>{t("common.episodeShort", { number: 1 })}</span>
+                          <span>{t("common.episodeShort", { number: totalEpisodes })}</span>
+                        </div>
+                        </>
+                      )}
 
                       {tab === "local" && (
                         <>

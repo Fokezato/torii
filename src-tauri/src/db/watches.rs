@@ -31,6 +31,14 @@ pub struct Watch {
     pub streaming: bool,
     /// `None` = follow the global setting.
     pub delete_after_watched: Option<bool>,
+    /// AniList format: TV, MOVIE, OVA...
+    pub format: Option<String>,
+}
+
+impl Watch {
+    pub fn is_movie(&self) -> bool {
+        self.format.as_deref() == Some("MOVIE")
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -54,6 +62,7 @@ pub struct NewWatch {
     pub max_resolution: Option<String>,
     pub strip_audio: Option<bool>,
     pub streaming: Option<bool>,
+    pub format: Option<String>,
     #[serde(skip)]
     pub series_anilist_id: Option<i64>,
     #[serde(skip)]
@@ -96,8 +105,8 @@ pub async fn create(pool: &SqlitePool, library_root: &str, w: NewWatch) -> Resul
 
     let id: i64 = sqlx::query_scalar(
         "INSERT INTO watches \
-         (title, query, anilist_id, cover_url, quality, audio_lang, sub_lang, folder, delete_after_days, active, notify_on_available, status, list_status, episodes, episode_start, episode_end, max_resolution, strip_audio, series_anilist_id, series_title, streaming, created_at, updated_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+         (title, query, anilist_id, cover_url, quality, audio_lang, sub_lang, folder, delete_after_days, active, notify_on_available, status, list_status, episodes, episode_start, episode_end, max_resolution, strip_audio, series_anilist_id, series_title, streaming, format, created_at, updated_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
     )
     .bind(&w.title)
     .bind(&w.query)
@@ -120,6 +129,7 @@ pub async fn create(pool: &SqlitePool, library_root: &str, w: NewWatch) -> Resul
     .bind(w.series_anilist_id)
     .bind(&w.series_title)
     .bind(w.streaming.unwrap_or(false))
+    .bind(&w.format)
     .bind(&now)
     .bind(&now)
     .fetch_one(pool)
@@ -132,6 +142,15 @@ pub async fn set_series(pool: &SqlitePool, id: i64, series_anilist_id: i64, seri
     sqlx::query("UPDATE watches SET series_anilist_id = ?, series_title = ? WHERE id = ?")
         .bind(series_anilist_id)
         .bind(series_title)
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn set_format(pool: &SqlitePool, id: i64, format: &str) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE watches SET format = ? WHERE id = ?")
+        .bind(format)
         .bind(id)
         .execute(pool)
         .await?;

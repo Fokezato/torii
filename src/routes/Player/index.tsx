@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import { playerOpen, playerStop } from "@/lib/player";
 import { episodeStreamStart, listWatchEpisodes } from "@/lib/episodes";
 import { listWatches } from "@/lib/watches";
-import { formatPlayerTitle, parseEpisodeLabel } from "@/lib/episodeName";
+import { formatPlayerTitle, episodeLabelOf } from "@/lib/episodeName";
 import { episodeNumberOf, isPlayable, isStreamable } from "@/lib/continueWatching";
 import { usePlayerHost } from "@/lib/usePlayerHost";
 import { getSettings } from "@/lib/tauri";
@@ -63,7 +63,7 @@ export default function Player() {
         return;
       }
       if (cancelled) return;
-      const rawLabel = parseEpisodeLabel(ep.name, ep.episode_number);
+      const rawLabel = episodeLabelOf(watch, ep.name, ep.episode_number);
       const { title, episodeLabel } = formatPlayerTitle(watch.title, rawLabel, watch.series_title);
       const resume = !ep.watched_at && (ep.watch_position_ms ?? 0) > MIN_RESUME_MS ? ep.watch_position_ms : null;
       await playerOpen(source, title, episodeLabel, watch.id, number, resume);

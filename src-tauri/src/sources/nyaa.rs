@@ -38,6 +38,8 @@ pub struct Rejections {
     pub range: usize,
     pub other_work: usize,
     pub language: usize,
+    /// Movie searches: episodes and season packs.
+    pub not_movie: usize,
 }
 
 pub struct EpisodeMatch {
@@ -232,6 +234,28 @@ fn normalize_words(text: &str) -> String {
         .map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { ' ' })
         .collect();
     mapped.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// A release that is a single episode or a season pack, not a movie.
+pub fn is_episodic_release(title: &str) -> bool {
+    static SERIES: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)\b(?:batch|complete|season|s\d{1,2}|\d{1,3}\s?[-~]\s?\d{1,3}|episodes?)\b").unwrap()
+    });
+    extract_episode_number(title).is_some() || SERIES.is_match(title)
+}
+
+/// The movie file inside a release: the largest video, skipping extras.
+pub fn movie_file<'a>(files: &'a [crate::torrent_engine::PackFile]) -> Option<&'a crate::torrent_engine::PackFile> {
+    static EXTRA: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)\b(?:extras?|specials?|bonus|nc ?op|nc ?ed|creditless|menus?|pv|previews?|trailers?|sample)\b").unwrap()
+    });
+    files
+        .iter()
+        .filter(|f| {
+            let ext = f.path.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+            VIDEO_EXTENSIONS.contains(&ext.as_str()) && !EXTRA.is_match(&f.path)
+        })
+        .max_by_key(|f| f.len)
 }
 
 /// A release of another work in the same franchise: "Steins;Gate 0", "... The Movie",
@@ -633,8 +657,9 @@ pub async fn find_new_matches(
     episode_start: Option<i64>,
     episode_end: Option<i64>,
     seen_ids: &HashSet<String>,
+    movie: bool,
 ) -> Result<MatchResult, String> {
-    let (search_query, season) = split_season(query);
+    let (search_query, season) = if movie { (query.to_string(), None) } else { split_season(query) };
     let all = search(client, &search_query).await?;
     let all = match season {
         Some(s) => search_with_episode_probes(client, &search_query, s, episode_start, episode_end, all).await,
@@ -646,6 +671,12 @@ pub async fn find_new_matches(
     for c in all.into_iter().filter(|c| !seen_ids.contains(&c.id)) {
         if !matches_quality(&c.title, quality) {
             rejected.quality += 1;
+        } else if movie {
+            if is_episodic_release(&c.title) {
+                rejected.not_movie += 1;
+            } else {
+                new_candidates.push(c);
+            }
         } else if season.is_some_and(|s| !title_matches_season(&c.title, s)) {
             rejected.season += 1;
         } else if !title_matches_episode_range(&c.title, episode_start, episode_end) {
@@ -801,6 +832,16 @@ mod tests {
         assert!(is_other_work("[Group] Show 2nd Season - 05", &show, 1));
         assert!(!is_other_work("[Group] Unrelated Name - 05", &show, 1));
         assert!(is_other_work("Gekijouban Steins;Gate - Fuka Ryouiki no Deja vu", &sg, 1));
+    }
+
+    #[test]
+    fn movie_releases_exclude_episodes_and_packs() {
+        assert!(!is_episodic_release("[Group] Kimi no Na wa. (2016) [BD 1080p]"));
+        assert!(!is_episodic_release("[Judas] Suzume no Tojimari [1080p][HEVC x265 10bit][Multi-Subs]"));
+        assert!(is_episodic_release("[SubsPlease] Show - 05 (1080p)"));
+        assert!(is_episodic_release("[Group] Show (01-24) [1080p] [Batch]"));
+        assert!(is_episodic_release("[Group] Show Season 2 [1080p]"));
+        assert!(is_episodic_release("Show S01 1080p"));
     }
 
     #[test]
