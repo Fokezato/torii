@@ -33,6 +33,19 @@ export async function mediaProbe(path: string): Promise<MediaProbe> {
   return invoke("media_probe", { path });
 }
 
+/** Resolution from the probe, else the quality tag in the release name. */
+export function videoQuality(probe: MediaProbe | undefined, releaseName: string | null): string | null {
+  if (probe && probe.width > 0) {
+    if (probe.width >= 3800) return "4K";
+    if (probe.width >= 2500) return "1440p";
+    if (probe.width >= 1900) return "1080p";
+    if (probe.width >= 1260) return "720p";
+    return `${probe.height}p`;
+  }
+  const match = releaseName?.match(/\b(2160p|4k|1440p|1080p|720p|480p)\b/i);
+  return match ? match[1].toLowerCase().replace("4k", "4K") : null;
+}
+
 export async function mediaFrame(path: string, timeMs: number): Promise<string> {
   return invoke("media_frame", { path, timeMs: Math.round(timeMs) });
 }

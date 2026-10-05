@@ -81,3 +81,14 @@ export function seasonTabLabel(seasonTitle: string, seriesTitle: string | null):
     .replace(/(\d+)(?:st|nd|rd|th)\s*season/i, (_, n) => t("labels.season", { number: Number(n) }))
     .replace(/\bpart\s*(\d+)/i, (_, n) => t("labels.part", { number: Number(n) }));
 }
+
+export interface EpisodeMeta {
+  number: number;
+  title: string | null;
+  synopsis: string | null;
+  thumbnail: string | null;
+}
+
+export async function getEpisodeMeta(anilistId: number): Promise<EpisodeMeta[]> {
+  return invoke<EpisodeMeta[]>("episode_meta", { anilistId });
+}

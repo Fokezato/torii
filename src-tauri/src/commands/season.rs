@@ -1,6 +1,6 @@
 use crate::{
     error::AppError,
-    sources::{anilist, news},
+    sources::{anilist, kitsu, news},
     state::AppState,
 };
 use tauri::State;
@@ -46,6 +46,14 @@ pub async fn anime_seasons(
     anilist_id: i32,
 ) -> Result<Vec<anilist::AnimeSummary>, AppError> {
     anilist::franchise_seasons(&state.http, anilist_id).await.map_err(AppError::Fetch)
+}
+
+#[tauri::command]
+pub async fn episode_meta(
+    state: State<'_, AppState>,
+    anilist_id: i64,
+) -> Result<Vec<kitsu::EpisodeMeta>, AppError> {
+    kitsu::episodes(&state.http, anilist_id).await.map_err(AppError::Fetch)
 }
 
 #[tauri::command]

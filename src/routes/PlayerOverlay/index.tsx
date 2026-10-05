@@ -21,6 +21,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import {
   mediaFrame,
   mediaProbe,
+  videoQuality,
   playerBringToFront,
   playerGetSkipSegments,
   playerSaveProgress,
@@ -44,7 +45,7 @@ import {
 } from "@/lib/player";
 import { episodePrefetchNext, episodeStreamStart, listWatchEpisodes, type Episode } from "@/lib/episodes";
 import { isStreamStartable } from "@/lib/continueWatching";
-import { formatPlayerTitle, parseEpisodeLabel, parseEpisodeNumber } from "@/lib/episodeName";
+import { formatPlayerTitle, parseEpisodeLabel, parseEpisodeNumber, episodeLabelOf } from "@/lib/episodeName";
 import { listWatches, type Watch } from "@/lib/watches";
 import { getSettings } from "@/lib/tauri";
 import { PlayerSettingsButton } from "@/components/player/PlayerSettingsButton";
@@ -67,6 +68,8 @@ import {
 
 const IDLE_HIDE_MS = 3000;
 const SKIP_MS = 10_000;
+// The skip button shows up a bit before the segment, so it is there when it starts.
+const SKIP_BUTTON_LEAD_MS = 1_000;
 const SEEK_SETTLE_MS = 1500;
 
 function formatTime(ms: number): string {
@@ -128,7 +131,7 @@ async function openEpisode(ep: Episode, watchId: number, watch: Watch | null): P
     episodeSource(ep) ??
     (ep.status === "downloading" || isStreamStartable(watch, ep) ? await episodeStreamStart(ep.id).catch(() => null) : null);
   if (!source) return;
-  const rawLabel = parseEpisodeLabel(ep.name, ep.episode_number);
+  const rawLabel = episodeLabelOf(watch, ep.name, ep.episode_number);
   const { title, episodeLabel } = watch
     ? formatPlayerTitle(watch.title, rawLabel, watch.series_title)
     : { title: "", episodeLabel: rawLabel };
@@ -162,6 +165,7 @@ async function openNextEpisode(snap: PlayerSnapshot): Promise<boolean> {
 export default function PlayerOverlay() {
   const { t } = useTranslation();
   const [snapshot, setSnapshot] = useState<PlayerSnapshot | null>(null);
+  const snapshotRef = useRef<PlayerSnapshot | null>(null);
   const [stalled, setStalled] = useState(false);
   const lastMoveRef = useRef<{ pos: number; at: number }>({ pos: -1, at: 0 });
   const prefetchDoneRef = useRef(false);
@@ -185,10 +189,18 @@ export default function PlayerOverlay() {
       shortcutRef.current(event.payload.key, event.payload.shift),
     );
     const unlistenNext = listen("player:next-episode-requested", () => shortcutRef.current("n", true));
+    const unlistenSegments = listen<{ watch_id: number; episode_number: number }>("player:skip-segments-updated", (e) => {
+      const snap = snapshotRef.current;
+      if (snap?.watch_id !== e.payload.watch_id || snap?.episode_number !== e.payload.episode_number) return;
+      playerGetSkipSegments(e.payload.watch_id, e.payload.episode_number)
+        .then(setSkipSegments)
+        .catch(() => {});
+    });
     return () => {
       window.removeEventListener("keydown", onKey);
       unlistenKey.then((fn) => fn());
       unlistenNext.then((fn) => fn());
+      unlistenSegments.then((fn) => fn());
     };
   }, []);
   const [openMenu, setOpenMenu] = useState<"tracks" | "episodes" | "settings" | null>(null);
@@ -228,6 +240,7 @@ export default function PlayerOverlay() {
     const id = setInterval(() => {
       playerSnapshot()
         .then((snap) => {
+          snapshotRef.current = snap;
           setSnapshot(snap);
           setPendingSeek((pending) => {
             if (!pending) return null;
@@ -499,7 +512,7 @@ export default function PlayerOverlay() {
         segmentMarks.push({ startPct: toPct(range[0]), endPct: toPct(range[1]), label: t(`player.segment.${kind}`) });
       }
       const autoSkips = skipSettings.auto[kind] && !isMixed(skipSegments, kind);
-      if (!autoSkips && positionMs >= range[0] && positionMs < range[1]) {
+      if (!autoSkips && positionMs >= range[0] - SKIP_BUTTON_LEAD_MS && positionMs < range[1]) {
         activeSkip = { label: t(`player.skip.${kind}`), endMs: range[1] };
       }
     }
@@ -960,18 +973,6 @@ function SeekBar({
   );
 }
 
-function qualityLabel(probe: MediaProbe | undefined, releaseName: string | null): string | null {
-  if (probe && probe.width > 0) {
-    if (probe.width >= 3800) return "4K";
-    if (probe.width >= 2500) return "1440p";
-    if (probe.width >= 1900) return "1080p";
-    if (probe.width >= 1260) return "720p";
-    return `${probe.height}p`;
-  }
-  const match = releaseName?.match(/\b(2160p|4k|1440p|1080p|720p|480p)\b/i);
-  return match ? match[1].toLowerCase().replace("4k", "4K") : null;
-}
-
 function trackChips(tracks: ProbeTrack[], preferred: string[]): { label: string; original: boolean; tag: string | null }[] {
   const seen = new Set<string>();
   const out: { label: string; original: boolean; tag: string | null }[] = [];
@@ -1034,7 +1035,7 @@ function EpisodeDetails({
     };
   }, [source]);
 
-  const quality = qualityLabel(probe, episode.name);
+  const quality = videoQuality(probe, episode.name);
   const audio = probe ? trackChips(probe.audio, preferredAudio) : [];
   const subtitles = probe ? trackChips(probe.subtitles, preferredSubtitle) : [];
 

@@ -46,6 +46,24 @@ pub async fn cancel_episode_download(
     Ok(())
 }
 
+/// Manual watched toggle from the episode menu. Unwatching also clears the resume point.
+#[tauri::command]
+pub async fn set_episode_watched(state: State<'_, AppState>, episode_id: i64, watched: bool) -> Result<(), AppError> {
+    if watched {
+        sqlx::query("UPDATE episodes SET watched_at = COALESCE(watched_at, ?) WHERE id = ?")
+            .bind(chrono::Utc::now().to_rfc3339())
+            .bind(episode_id)
+            .execute(&state.db)
+            .await?;
+    } else {
+        sqlx::query("UPDATE episodes SET watched_at = NULL, watch_position_ms = NULL WHERE id = ?")
+            .bind(episode_id)
+            .execute(&state.db)
+            .await?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn delete_episode(state: State<'_, AppState>, episode_id: i64) -> Result<(), AppError> {
     engine::delete_episode(&state, episode_id).await

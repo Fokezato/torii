@@ -161,6 +161,14 @@ struct RawStudio {
     name: String,
 }
 
+/// Drops credits like "(Source: Crunchyroll)" or "[Written by MAL Rewrite]".
+pub fn strip_credits(text: &str) -> String {
+    static CREDIT: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"(?i)\s*[(\[]\s*(?:source|written by)\b[^)\]]*[)\]]").unwrap()
+    });
+    CREDIT.replace_all(text, "").trim().to_string()
+}
+
 fn strip_html(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     let mut in_tag = false;
@@ -194,7 +202,7 @@ impl From<RawMedia> for AnimeSummary {
             score: m.average_score,
             duration: m.duration,
             studio: m.studios.and_then(|s| s.nodes.into_iter().next()).map(|s| s.name),
-            description: m.description.map(|d| strip_html(&d)).filter(|d| !d.is_empty()),
+            description: m.description.map(|d| strip_credits(&strip_html(&d))).filter(|d| !d.is_empty()),
             season: m.season,
             season_year: m.season_year,
             format: m.format,
@@ -436,4 +444,16 @@ pub async fn franchise_seasons(client: &reqwest::Client, anilist_id: i32) -> Res
     let mut seasons = by_ids(client, &seen).await?;
     seasons.sort_by_key(|s| (s.season_year.unwrap_or(i32::MAX), season_order(s.season.as_deref())));
     Ok(seasons)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strip_credits;
+
+    #[test]
+    fn credits_are_removed_from_synopses() {
+        assert_eq!(strip_credits("The battle ignites. (Source: Crunchyroll)"), "The battle ignites.");
+        assert_eq!(strip_credits("A story.\n\n[Written by MAL Rewrite]"), "A story.");
+        assert_eq!(strip_credits("He returns (again) home."), "He returns (again) home.");
+    }
 }

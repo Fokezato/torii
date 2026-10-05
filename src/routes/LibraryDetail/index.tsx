@@ -4,6 +4,8 @@ import { useNavigate, useParams } from "react-router-dom";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   Check,
+  CheckCheck,
+  EyeOff,
   ChevronLeft,
   Download,
   ExternalLink,
@@ -34,12 +36,24 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { RemoveWatchDialog } from "@/components/library/RemoveWatchDialog";
 import { WatchPreferencesDialog } from "@/components/library/WatchPreferencesDialog";
-import { getAnimeById, getAnimeSeasons, seasonTabLabel, type AnimeSummary } from "@/lib/anilist";
+import {
+  getAnimeById,
+  getAnimeSeasons,
+  getEpisodeMeta,
+  seasonTabLabel,
+  type AnimeSummary,
+  type EpisodeMeta,
+} from "@/lib/anilist";
+import { mediaFrame, mediaProbe, videoQuality, type ProbeTrack } from "@/lib/player";
+import { humanizeTrackLanguage, probeTrackName } from "@/lib/playerLanguage";
+import { TranslatedText } from "@/components/shared/TranslatedText";
 import { WatchFormModal } from "@/components/anime/WatchFormModal";
 import { findContinueEpisode, playEpisode } from "@/lib/continueWatching";
 import {
   deleteEpisode,
   downloadMissingEpisodes,
+  onDownloadProgress,
+  setEpisodeWatched,
   forceCheckEpisode,
   listEpisodeSources,
   listWatchEpisodes,
@@ -48,7 +62,8 @@ import {
   type Episode,
 } from "@/lib/episodes";
 import { notify } from "@/lib/notify";
-import { parseEpisodeLabel, parseEpisodeNumber, parseSeasonFromTitle } from "@/lib/episodeName";
+import { episodeView, TONE_STYLE, type EpisodeGroup, type EpisodeView } from "@/lib/episodeView";
+import { isMovie as isMovieWatch, parseEpisodeLabel, parseEpisodeNumber, parseSeasonFromTitle } from "@/lib/episodeName";
 import {
   listWatches,
   type RemoveMode,
@@ -61,7 +76,6 @@ import {
   type Watch,
 } from "@/lib/watches";
 import {
-  episodeStatusLabel,
   languageLabel,
   listStatusLabel,
   listStatusOptions,
@@ -70,7 +84,6 @@ import {
   statusLabel,
 } from "@/lib/constants";
 import { useTranslation } from "react-i18next";
-import { currentLocale } from "@/i18n";
 
 export default function LibraryDetail() {
   const { t } = useTranslation();
@@ -118,6 +131,14 @@ export default function LibraryDetail() {
     queryFn: () => getAnimeById(watch!.anilist_id!),
     enabled: watch?.anilist_id != null,
   });
+  const { data: episodeMetaList } = useQuery({
+    queryKey: ["episode-meta", watch?.anilist_id],
+    queryFn: () => getEpisodeMeta(watch!.anilist_id!),
+    enabled: watch?.anilist_id != null,
+    staleTime: 6 * 3600_000,
+    retry: 1,
+  });
+  const episodeMeta = new Map((episodeMetaList ?? []).map((m) => [m.number, m]));
 
   const upcomingByEpisode = new Map((anime?.upcoming_episodes ?? []).map((u) => [u.episode, u.airing_at]));
 
@@ -127,6 +148,21 @@ export default function LibraryDetail() {
     enabled: watch != null,
     refetchInterval: 10_000,
   });
+
+  const [downloadPct, setDownloadPct] = useState<Record<number, number>>({});
+  useEffect(() => {
+    const unlisten = onDownloadProgress((batch) => {
+      setDownloadPct((prev) => {
+        const next = { ...prev };
+        for (const p of batch) next[p.episode_id] = p.total_bytes > 0 ? (p.progress_bytes / p.total_bytes) * 100 : 0;
+        return next;
+      });
+    });
+    return () => {
+      unlisten.then((fn) => fn()).catch(() => {});
+    };
+  }, []);
+  const [episodeFilter, setEpisodeFilter] = useState<"all" | "unwatched" | EpisodeGroup>("all");
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["watches"] });
 
@@ -176,6 +212,10 @@ export default function LibraryDetail() {
 
   const banner = anime?.banner_url ?? anime?.cover_url ?? watch.cover_url;
   const episodes = watch.episodes ?? anime?.episodes;
+  const isMovie = isMovieWatch(watch);
+  const movieEpisode = isMovie
+    ? episodeList.slice().sort((a, b) => MOVIE_RANK.indexOf(a.status) - MOVIE_RANK.indexOf(b.status))[0]
+    : undefined;
   const seriesTitle = seriesTitleOf(watch);
   const tabLabel = (w: Watch) =>
     seasonTabLabel(franchise.find((f) => f.anilist_id === w.anilist_id)?.title ?? w.title, seriesTitle);
@@ -197,8 +237,12 @@ export default function LibraryDetail() {
       ? `${anime.season_year} · ${seasonLabel(anime.season)}`
       : null,
     anime?.studio,
-    anime?.duration ? t("common.minPerEpisode", { count: anime.duration }) : null,
-    episodes ? t("common.episodeCount", { count: episodes }) : null,
+    anime?.duration
+      ? isMovie
+        ? movieLength(anime.duration * 60_000)
+        : t("common.minPerEpisode", { count: anime.duration })
+      : null,
+    episodes && !isMovie ? t("common.episodeCount", { count: episodes }) : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -220,7 +264,7 @@ export default function LibraryDetail() {
         {watch.status && (
           <span className="absolute bottom-4 left-5 rounded-md bg-accent2 px-2.5 py-1 text-[11px] font-bold tracking-wide text-background uppercase">
             {statusLabel(watch.status)}
-            {episodes ? ` · ${episodes} eps` : ""}
+            {episodes && !isMovie ? ` · ${episodes} eps` : ""}
           </span>
         )}
       </div>
@@ -335,13 +379,13 @@ export default function LibraryDetail() {
         )}
 
         {anime?.description && (
-          <p className="max-w-[760px] text-[13.5px] leading-relaxed text-[#C7CAD3]">{anime.description}</p>
+          <Synopsis text={anime.description} />
         )}
       </div>
 
       <div className="flex flex-col gap-3.5">
         <div className="flex flex-wrap items-center gap-2.5">
-          <h2 className="text-lg font-bold">{t("detail.episodes")}</h2>
+          <h2 className="text-lg font-bold">{isMovie ? t("detail.movie") : t("detail.episodes")}</h2>
           <div className="flex flex-wrap items-center gap-2">
             {seasons.map((s) => (
               <button
@@ -393,30 +437,37 @@ export default function LibraryDetail() {
               </Popover>
             )}
           </div>
-          <span className="text-xs text-[#6C7180]">
-            {episodes
-              ? t("detail.downloadedOf", { count: downloadedCount, total: episodes })
-              : t("detail.downloaded", { count: downloadedCount })}
-          </span>
+          {!isMovie && (
+            <span className="text-xs text-[#6C7180]">
+              {episodes
+                ? t("detail.downloadedOf", { count: downloadedCount, total: episodes })
+                : t("detail.downloaded", { count: downloadedCount })}
+            </span>
+          )}
         </div>
-        {episodeList.length === 0 ? (
+        {isMovie && movieEpisode ? (
+          <MoviePanel
+            episode={movieEpisode}
+            watch={watch}
+            image={anime?.banner_url ?? watch.cover_url}
+            durationMs={anime?.duration ? anime.duration * 60_000 : undefined}
+            downloadPct={downloadPct[movieEpisode.id]}
+          />
+        ) : episodeList.length === 0 ? (
           <div className="rounded-xl border border-dashed border-[#23262F] p-6 text-center text-xs text-[#6C7180]">
             {t("detail.noEpisodes")}
           </div>
         ) : (
-          <div className="flex flex-col gap-2">
-            <PackBanners episodes={episodeList} />
-            {episodeList
-              .slice()
-              .sort(
-                (a, b) =>
-                  (a.episode_number ?? parseEpisodeNumber(a.name) ?? 0) -
-                  (b.episode_number ?? parseEpisodeNumber(b.name) ?? 0),
-              )
-              .map((ep) => (
-                <EpisodeItem key={ep.id} episode={ep} watch={watch} airingAt={upcomingByEpisode.get(ep.episode_number ?? -1)} />
-              ))}
-          </div>
+          <EpisodeList
+            episodes={episodeList}
+            watch={watch}
+            upcoming={upcomingByEpisode}
+            durationMs={anime?.duration ? anime.duration * 60_000 : undefined}
+            downloadPct={downloadPct}
+            meta={episodeMeta}
+            filter={episodeFilter}
+            onFilter={setEpisodeFilter}
+          />
         )}
       </div>
 
@@ -426,16 +477,6 @@ export default function LibraryDetail() {
     </div>
   );
 }
-
-const EPISODE_STATUS_STYLE: Record<string, { bg: string; fg: string }> = {
-  pending: { bg: "transparent", fg: "#6C7180" },
-  found: { bg: "transparent", fg: "#B5B9C4" },
-  ready: { bg: "transparent", fg: "#6FC48A" },
-  downloading: { bg: "#FF6A45", fg: "#0B0C10" },
-  available: { bg: "#6FC48A", fg: "#0B0C10" },
-  error: { bg: "#E5484D", fg: "#0B0C10" },
-  deleted: { bg: "transparent", fg: "#6C7180" },
-};
 
 function PackBanner({ episodes }: { episodes: Episode[] }) {
   const { t } = useTranslation();
@@ -483,41 +524,324 @@ function PackBanners({ episodes }: { episodes: Episode[] }) {
   );
 }
 
-function EpisodeItem({ episode, watch, airingAt }: { episode: Episode; watch: Watch; airingAt?: number }) {
+function useEpisodeMedia(episode: Episode | undefined) {
+  const localPath = episode?.status === "available" ? episode.item_path : null;
+  const { data: probe } = useQuery({
+    queryKey: ["media-probe", localPath],
+    queryFn: () => mediaProbe(localPath!),
+    enabled: localPath != null,
+    staleTime: Infinity,
+    retry: false,
+  });
+  // Same 30% point as the player's episode panel, so the frame cache is shared.
+  const frameAt = probe && probe.duration_ms > 0 ? Math.round(probe.duration_ms * 0.3) : null;
+  const { data: frame } = useQuery({
+    queryKey: ["media-frame", localPath, frameAt],
+    queryFn: () => mediaFrame(localPath!, frameAt!),
+    enabled: localPath != null && frameAt != null,
+    staleTime: Infinity,
+    retry: false,
+  });
+  return { probe, frame };
+}
+
+function movieLength(ms: number): string {
+  const total = Math.round(ms / 60_000);
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  return h > 0 ? `${h}h ${String(m).padStart(2, "0")}min` : `${m}min`;
+}
+
+function Synopsis({ text }: { text: string }) {
+  const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(false);
+  const long = text.length > 480;
+  return (
+    <div className="flex max-w-[1150px] flex-col items-start gap-1">
+      <p className={`text-[13.5px] leading-relaxed text-[#C7CAD3] ${long && !expanded ? "line-clamp-4" : ""}`}>{text}</p>
+      {long && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="text-[12px] font-semibold text-primary hover:underline"
+        >
+          {expanded ? t("detail.synopsisLess") : t("detail.synopsisMore")}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function MoviePanel({
+  episode,
+  watch,
+  image,
+  durationMs,
+  downloadPct,
+}: {
+  episode: Episode;
+  watch: Watch;
+  image: string | null;
+  durationMs?: number;
+  downloadPct?: number;
+}) {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const view = episodeView(episode, watch, { durationMs, downloadPct, now: Date.now() });
+  const style = TONE_STYLE[view.tone];
+  const { probe, frame } = useEpisodeMedia(episode);
+  const quality = episode.status !== "pending" ? videoQuality(probe, episode.name) : null;
+  const length = probe?.duration_ms || durationMs;
+  const position = episode.watch_position_ms ?? 0;
+  const resume = view.tone === "progress";
+  const play = () => navigate(`/watch/${watch.id}/${episode.episode_number ?? 1}`);
+  const picture = frame ?? image;
+  const languages = (tracks: ProbeTrack[]) => [
+    ...new Set(tracks.map((tr) => humanizeTrackLanguage(probeTrackName(tr.language, tr.description))).filter(Boolean)),
+  ];
+  const audio = probe ? languages(probe.audio) : [];
+  const subtitles = probe ? languages(probe.subtitles) : [];
+
+  return (
+    <div className="relative flex flex-col gap-5 rounded-xl border border-[#1E212A] bg-[#15171D] p-4 md:flex-row">
+      <button
+        type="button"
+        disabled={!view.playable}
+        onClick={play}
+        aria-label={t("detail.watchMovie")}
+        className="group relative aspect-video w-full shrink-0 overflow-hidden rounded-lg bg-[#1E212A] md:w-[440px]"
+      >
+        {picture && <img src={picture} alt="" className="absolute inset-0 h-full w-full object-cover" />}
+        {view.playable && (
+          <span className="absolute inset-0 flex items-center justify-center bg-black/25 transition-colors group-hover:bg-black/45">
+            <span className="flex size-14 items-center justify-center rounded-full bg-primary/90 text-primary-foreground transition-transform group-hover:scale-105">
+              <Play className="ml-0.5 size-6" fill="currentColor" />
+            </span>
+          </span>
+        )}
+        {view.watchProgress != null && (
+          <span className="absolute inset-x-0 bottom-0 h-1 bg-black/50">
+            <span className="block h-full bg-primary" style={{ width: `${view.watchProgress * 100}%` }} />
+          </span>
+        )}
+      </button>
+
+      <div className="flex min-w-0 flex-1 flex-col justify-center gap-3 py-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span
+            className="rounded-[5px] px-[7px] py-[3px] text-[10px] font-bold tracking-wide uppercase"
+            style={{ color: style.fg, background: style.bg, border: style.border ? `1px solid ${style.border}` : undefined }}
+          >
+            {view.label}
+          </span>
+          {quality && (
+            <span className="rounded-[5px] border border-[#2A2E39] px-[7px] py-[2px] text-[10px] font-bold text-[#B5B9C4]">
+              {quality}
+            </span>
+          )}
+          {length ? <span className="text-[12px] text-[#8A8F9C]">{movieLength(length)}</span> : null}
+        </div>
+
+        {view.detail && (
+          <p className={`text-[12.5px] ${view.tone === "error" ? "text-destructive" : "text-[#8A8F9C]"}`}>{view.detail}</p>
+        )}
+        {episode.status === "downloading" && (
+          <div className="h-1.5 w-full max-w-[420px] overflow-hidden rounded-full bg-[#22252E]">
+            <div className="h-full bg-primary transition-[width]" style={{ width: `${downloadPct ?? 0}%` }} />
+          </div>
+        )}
+        {audio.length > 0 && (
+          <p className="text-[12.5px] text-[#B5B9C4]">
+            <span className="text-[#6C7180]">{t("detail.audio")}:</span> {audio.join(", ")}
+          </p>
+        )}
+        {subtitles.length > 0 && (
+          <p className="text-[12.5px] text-[#B5B9C4]">
+            <span className="text-[#6C7180]">{t("detail.subtitle")}:</span> {subtitles.join(", ")}
+          </p>
+        )}
+
+        <div className="flex flex-wrap items-center gap-2 pt-2">
+          {view.playable && (
+            <button
+              type="button"
+              onClick={play}
+              className="flex items-center gap-2 rounded-[10px] bg-primary px-4.5 py-2.5 text-[13px] font-semibold text-primary-foreground transition-opacity hover:opacity-90"
+            >
+              <Play className="size-3.5" fill="currentColor" />
+              {resume ? t("detail.resumeAt", { time: movieLength(position) }) : t("detail.watchMovie")}
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="absolute top-3 right-3">
+        <EpisodeActionsMenu episode={episode} watch={watch} outOfRange={false} />
+      </div>
+    </div>
+  );
+}
+
+const MOVIE_RANK = ["available", "downloading", "ready", "found", "error", "deleted", "pending"];
+
+function EpisodeList({
+  episodes,
+  watch,
+  upcoming,
+  durationMs,
+  downloadPct,
+  meta,
+  filter,
+  onFilter,
+}: {
+  episodes: Episode[];
+  watch: Watch;
+  upcoming: Map<number, number>;
+  durationMs?: number;
+  downloadPct: Record<number, number>;
+  meta: Map<number, EpisodeMeta>;
+  filter: "all" | "unwatched" | EpisodeGroup;
+  onFilter: (f: "all" | "unwatched" | EpisodeGroup) => void;
+}) {
+  const { t } = useTranslation();
+  const now = Date.now();
+  const rows = episodes
+    .slice()
+    .sort((a, b) => (a.episode_number ?? parseEpisodeNumber(a.name) ?? 0) - (b.episode_number ?? parseEpisodeNumber(b.name) ?? 0))
+    .map((ep) => ({
+      ep,
+      view: episodeView(ep, watch, {
+        airingAt: upcoming.get(ep.episode_number ?? -1),
+        durationMs,
+        downloadPct: downloadPct[ep.id],
+        now,
+      }),
+    }));
+  const next = rows.find((r) => r.view.playable && r.view.group !== "watched");
+  const count = (g: EpisodeGroup) => rows.filter((r) => r.view.group === g).length;
+  const downloading = rows.filter((r) => r.ep.status === "downloading").length;
+  const visible = rows.filter(({ view }) =>
+    filter === "all" ? true : filter === "unwatched" ? view.group !== "watched" && view.tone !== "muted" : view.group === filter,
+  );
+  const chips: { id: "all" | "unwatched" | EpisodeGroup; label: string }[] = [
+    { id: "all", label: t("epView.filterAll", { count: rows.length }) },
+    { id: "unwatched", label: t("epView.filterUnwatched") },
+    { id: "watched", label: t("epView.summaryWatched", { count: count("watched") }) },
+    { id: "ready", label: t("epView.summaryReady", { count: count("ready") }) },
+    { id: "waiting", label: t("epView.summaryWaiting", { count: count("waiting") }) },
+  ];
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-1.5">
+        {chips.map((c) => (
+          <button
+            key={c.id}
+            type="button"
+            aria-pressed={filter === c.id}
+            onClick={() => onFilter(c.id)}
+            className={`rounded-full px-3 py-1 text-[11.5px] font-semibold transition-colors ${
+              filter === c.id
+                ? "bg-primary text-primary-foreground"
+                : "border border-[#23262F] text-[#B5B9C4] hover:text-foreground"
+            }`}
+          >
+            {c.label}
+          </button>
+        ))}
+        {downloading > 0 && (
+          <span className="ml-auto text-[11px] text-[#8A8F9C]">{t("epView.summaryDownloading", { count: downloading })}</span>
+        )}
+      </div>
+      <PackBanners episodes={episodes} />
+      {visible.map(({ ep, view }) => (
+        <EpisodeItem
+          key={ep.id}
+          episode={ep}
+          watch={watch}
+          view={view}
+          meta={ep.episode_number != null ? meta.get(ep.episode_number) : undefined}
+          isNext={next?.ep.id === ep.id}
+        />
+      ))}
+      {visible.length === 0 && (
+        <p className="py-6 text-center text-xs text-[#6C7180]">{t("epView.filterEmpty")}</p>
+      )}
+    </div>
+  );
+}
+
+function EpisodeItem({
+  episode,
+  watch,
+  view,
+  meta,
+  isNext,
+}: {
+  episode: Episode;
+  watch: Watch;
+  view: EpisodeView;
+  meta?: EpisodeMeta;
+  isNext: boolean;
+}) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const n = episode.episode_number;
-  const outOfRange =
-    episode.status === "pending" &&
-    n != null &&
-    ((watch.episode_start != null && n < watch.episode_start) || (watch.episode_end != null && n > watch.episode_end));
+  const style = TONE_STYLE[view.tone];
+  const play = () => n != null && navigate(`/watch/${watch.id}/${n}`);
+  const dim = view.tone === "muted" || view.tone === "removed";
+  const { probe, frame } = useEpisodeMedia(episode);
 
-  const notYetAired = !outOfRange && episode.status === "pending" && airingAt != null;
+  const image = frame ?? meta?.thumbnail ?? watch.cover_url;
+  const coverOnly = !frame && !meta?.thumbnail;
+  const quality = episode.status !== "pending" ? videoQuality(probe, episode.name) : null;
+  const label = parseEpisodeLabel(episode.name, episode.episode_number);
 
-  const wantedLangs = [...(watch.audio_lang?.split(",") ?? []), ...(watch.sub_lang?.split(",") ?? [])]
-    .filter(Boolean)
-    .map(languageLabel);
-  const waitingForLocalizedRelease =
-    episode.status === "pending" && !outOfRange && !notYetAired && wantedLangs.length > 0;
-
-  const muted = { bg: "transparent", fg: "#6C7180" };
-  const s = outOfRange
-    ? { label: t("episodeStatus.notDownloaded"), ...muted }
-    : notYetAired
-    ? { label: t("episodeStatus.announced"), ...muted }
-    : waitingForLocalizedRelease
-      ? { label: t("episodeStatus.waitingLanguage"), ...muted }
-      : watch.streaming && episode.status === "deleted"
-        ? { label: episodeStatusLabel("ready"), ...EPISODE_STATUS_STYLE.ready }
-        : {
-            label: episodeStatusLabel(episode.status),
-            ...(EPISODE_STATUS_STYLE[episode.status] ?? { bg: "transparent", fg: "#B5B9C4" }),
-          };
   return (
-    <div className="flex items-center gap-3 rounded-[10px] border border-[#1E212A] bg-[#15171D] px-4 py-3">
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="flex min-w-0 items-center gap-2 text-[12.5px] font-medium" title={episode.name ?? undefined}>
-          <span className="truncate">{parseEpisodeLabel(episode.name, episode.episode_number)}</span>
+    <div
+      className={`relative flex items-center gap-3.5 overflow-hidden rounded-[10px] border bg-[#15171D] p-2.5 pr-3 ${
+        isNext ? "border-primary/60" : "border-[#1E212A]"
+      }`}
+    >
+      <button
+        type="button"
+        disabled={!view.playable}
+        onClick={play}
+        aria-label={t("epView.watch")}
+        className={`group relative aspect-video w-36 shrink-0 overflow-hidden rounded-[7px] bg-[#1E212A] ${dim ? "opacity-50" : ""}`}
+      >
+        {image && (
+          <img
+            src={image}
+            alt=""
+            loading="lazy"
+            className={`absolute inset-0 h-full w-full object-cover ${coverOnly ? "scale-110 blur-[2px] brightness-75" : ""}`}
+          />
+        )}
+        {view.playable && (
+          <span className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
+            <Play className="size-5 text-white" fill="currentColor" />
+          </span>
+        )}
+        {view.watchProgress != null && (
+          <span className="absolute inset-x-0 bottom-0 h-[3px] bg-black/50">
+            <span className="block h-full bg-primary" style={{ width: `${view.watchProgress * 100}%` }} />
+          </span>
+        )}
+      </button>
+      <div className={`flex min-w-0 flex-1 flex-col gap-0.5 ${dim ? "opacity-60" : ""}`}>
+        <span className="flex min-w-0 items-center gap-2" title={episode.name ?? undefined}>
+          <span className="shrink-0 text-[10.5px] font-semibold tracking-wide text-[#8A8F9C] uppercase">{label}</span>
+          <span
+            className="shrink-0 rounded-[5px] px-[6px] py-[2px] text-[9px] font-bold tracking-wide uppercase"
+            style={{ color: style.fg, background: style.bg, border: style.border ? `1px solid ${style.border}` : undefined }}
+          >
+            {view.label}
+          </span>
+          {quality && (
+            <span className="shrink-0 rounded-[4px] border border-[#2A2E39] px-1.5 py-px text-[9px] font-bold text-[#B5B9C4]">
+              {quality}
+            </span>
+          )}
           {packKey(episode) && episode.status !== "deleted" && (
             <span className="flex shrink-0 items-center gap-1 rounded-[4px] bg-accent2/15 px-1.5 py-px text-[9px] font-bold tracking-wide text-accent2 uppercase">
               <Package className="size-2.5" />
@@ -525,46 +849,35 @@ function EpisodeItem({ episode, watch, airingAt }: { episode: Episode; watch: Wa
             </span>
           )}
         </span>
-        {episode.status === "error" && episode.error_message && (
-          <span className="truncate text-[11px] text-destructive">{episode.error_message}</span>
-        )}
-        {notYetAired && (
-          <span className="truncate text-[11px] text-[#6C7180]">
-            {t("detail.availableFrom", { date: new Date(airingAt! * 1000).toLocaleDateString(currentLocale()) })}
+        {meta?.title && (
+          <span className="truncate text-[13px] font-semibold" title={meta.title}>
+            {meta.title}
           </span>
         )}
-        {waitingForLocalizedRelease && (
-          <span className="truncate text-[11px] text-[#6C7180]" title={t("detail.localizedHint")}>
-            {t("detail.waitingLocalized", { languages: wantedLangs.join(", ") })}
+        {meta?.synopsis && (
+          <TranslatedText text={meta.synopsis} className="line-clamp-2 text-[11.5px] leading-snug text-[#8A8F9C]" />
+        )}
+        {view.detail && (
+          <span className={`truncate text-[11px] ${view.tone === "error" ? "text-destructive" : "text-[#6C7180]"}`} title={view.detail}>
+            {view.detail}
           </span>
         )}
       </div>
-      <span
-        className="shrink-0 rounded-[5px] px-[7px] py-[3px] text-[9px] font-bold tracking-wide uppercase"
-        style={{
-          color: s.fg,
-          background: s.bg,
-          border: s.bg === "transparent" ? "1px solid #33374A" : undefined,
-        }}
-      >
-        {s.label}
-      </span>
-      {n != null &&
-        (episode.status === "downloading" ||
-          (watch.streaming && !notYetAired && !outOfRange && episode.status !== "available")) && (
-        <button
-          type="button"
-          onClick={() => navigate(`/watch/${watch.id}/${n}`)}
-          title={t("detail.watchNowHint")}
-          className="flex shrink-0 items-center gap-1.5 rounded-[8px] border border-[#262A35] px-2.5 py-1 text-[11px] font-semibold text-foreground transition-colors hover:bg-secondary"
-        >
-          <Play className="size-3" fill="currentColor" />
-          {t("detail.watchNow")}
-        </button>
-      )}
-      {!notYetAired && (
-        <EpisodeActionsMenu episode={episode} watch={watch} outOfRange={outOfRange} />
-      )}
+      <div className="flex shrink-0 items-center gap-1.5">
+        {view.playable && isNext && (
+          <button
+            type="button"
+            onClick={play}
+            className="flex items-center gap-1.5 rounded-[8px] bg-primary px-2.5 py-1 text-[11px] font-semibold text-primary-foreground transition-opacity hover:opacity-90"
+          >
+            <Play className="size-3" fill="currentColor" />
+            {t("epView.watch")}
+          </button>
+        )}
+        {view.tone !== "airing" && (
+          <EpisodeActionsMenu episode={episode} watch={watch} outOfRange={view.tone === "muted"} />
+        )}
+      </div>
     </div>
   );
 }
@@ -584,6 +897,11 @@ function EpisodeActionsMenu({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const queryClient = useQueryClient();
   const deletable = ["available", "downloading", "found", "ready", "error"].includes(episode.status);
+
+  const toggleWatched = useMutation({
+    mutationFn: () => setEpisodeWatched(episode.id, !episode.watched_at),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["watch-episodes"] }),
+  });
 
   const remove = useMutation({
     mutationFn: () => deleteEpisode(episode.id),
@@ -647,6 +965,22 @@ function EpisodeActionsMenu({
               : outOfRange
                 ? t("detail.downloadNow")
                 : t("detail.forceCheck")}
+          </button>
+          <button
+            type="button"
+            disabled={toggleWatched.isPending}
+            onClick={() => {
+              setMenuOpen(false);
+              toggleWatched.mutate();
+            }}
+            className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-white/5 disabled:opacity-40"
+          >
+            {episode.watched_at ? (
+              <EyeOff className="size-3.5 text-[#6C7180]" />
+            ) : (
+              <CheckCheck className="size-3.5 text-[#6C7180]" />
+            )}
+            {episode.watched_at ? t("epView.markUnwatched") : t("epView.markWatched")}
           </button>
           {deletable && (
             <button

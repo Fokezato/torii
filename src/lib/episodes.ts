@@ -100,6 +100,10 @@ export async function episodePrefetchNext(watchId: number, episodeNumber: number
 }
 
 /** Deletes the episode's file and marks it removed: it is not downloaded again automatically. */
+export async function setEpisodeWatched(episodeId: number, watched: boolean): Promise<void> {
+  return invoke<void>("set_episode_watched", { episodeId, watched });
+}
+
 export async function deleteEpisode(episodeId: number): Promise<void> {
   return invoke<void>("delete_episode", { episodeId });
 }
