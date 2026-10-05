@@ -20,14 +20,20 @@ impl SkipSegments {
         self.intro_start_ms.is_some() && self.ending_start_ms.is_some()
     }
 
-    pub fn fill_from(&mut self, detected: &SkipSegments) {
+    pub fn fill_from(&mut self, other: &SkipSegments) {
         if self.intro_start_ms.is_none() {
-            self.intro_start_ms = detected.intro_start_ms;
-            self.intro_end_ms = detected.intro_end_ms;
+            self.intro_start_ms = other.intro_start_ms;
+            self.intro_end_ms = other.intro_end_ms;
+            self.intro_mixed = other.intro_mixed;
         }
         if self.ending_start_ms.is_none() {
-            self.ending_start_ms = detected.ending_start_ms;
-            self.ending_end_ms = detected.ending_end_ms;
+            self.ending_start_ms = other.ending_start_ms;
+            self.ending_end_ms = other.ending_end_ms;
+            self.ending_mixed = other.ending_mixed;
+        }
+        if self.recap_start_ms.is_none() {
+            self.recap_start_ms = other.recap_start_ms;
+            self.recap_end_ms = other.recap_end_ms;
         }
     }
 }

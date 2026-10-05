@@ -1,6 +1,7 @@
 use std::path::Path;
 
 fn main() {
+    println!("cargo:rerun-if-changed=migrations");
     tauri_build::build();
     copy_vlc_runtime();
 }

@@ -4,7 +4,7 @@ use crate::player::media_tools::{MediaProbe, MediaTools};
 use crate::player::{NowPlaying, PlayerEngine, PlayerSnapshot, PlayerState, TrackInfo};
 use crate::state::AppState;
 use serde::Serialize;
-use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, State};
+use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, State};
 
 const OVERLAY_LABEL: &str = "player-overlay";
 
@@ -257,7 +257,31 @@ pub async fn player_get_skip_segments(
     watch_id: i64,
     episode_number: i64,
 ) -> Result<SkipSegments, AppError> {
-    let mut segments = aniskip_segments(&app_state, watch_id, episode_number).await?;
+    // Chapters are marked in this exact file, so they win over AniSkip's shared timings.
+    let mut segments = file_chapter_segments(&app, &app_state, watch_id, episode_number).await;
+    if !segments.is_complete() {
+        // Answer with what is cached; AniSkip can take many seconds, so it is fetched in
+        // the background and the player is told to ask again.
+        let cached = crate::db::skip_segments::get_cached(&app_state.db, watch_id, episode_number).await?;
+        let fresh = cached
+            .as_ref()
+            .is_some_and(|(s, at)| s.is_complete() || chrono::Utc::now() - *at < chrono::Duration::days(1));
+        if let Some((aniskip, _)) = &cached {
+            segments.fill_from(aniskip);
+        }
+        if !fresh {
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                let state = app.state::<AppState>();
+                if aniskip_segments(&state, watch_id, episode_number).await.is_ok() {
+                    let _ = app.emit(
+                        "player:skip-segments-updated",
+                        serde_json::json!({ "watch_id": watch_id, "episode_number": episode_number }),
+                    );
+                }
+            });
+        }
+    }
     if !segments.is_complete() {
         match crate::db::skip_segments::get_detected(&app_state.db, watch_id, episode_number).await? {
             Some(detected) => segments.fill_from(&detected),
@@ -265,6 +289,20 @@ pub async fn player_get_skip_segments(
         }
     }
     Ok(segments)
+}
+
+async fn file_chapter_segments(app: &AppHandle, app_state: &AppState, watch_id: i64, episode_number: i64) -> SkipSegments {
+    let Ok(episodes) = crate::db::episodes::list_for_watch(&app_state.db, watch_id).await else {
+        return SkipSegments::default();
+    };
+    let path = episodes
+        .into_iter()
+        .find(|e| e.episode_number == Some(episode_number) && e.status == "available")
+        .and_then(|e| e.item_path);
+    match path {
+        Some(path) => crate::intro_detect::file_chapters(app, &path).await,
+        None => SkipSegments::default(),
+    }
 }
 
 async fn aniskip_segments(

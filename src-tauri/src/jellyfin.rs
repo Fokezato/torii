@@ -81,38 +81,44 @@ pub async fn find_item_by_path(
     api_key: &str,
     file_path: &str,
 ) -> Result<Option<String>, String> {
-    let url = format!(
-        "{}/Items?Recursive=true&IncludeItemTypes=Episode&Fields=Path",
-        base_url.trim_end_matches('/')
-    );
-    let target = file_path.to_lowercase();
-
     for attempt in 0..6 {
         if attempt > 0 {
             tokio::time::sleep(Duration::from_secs(5)).await;
         }
-        let resp = client
-            .get(&url)
-            .header("X-Emby-Token", api_key)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
-        if !resp.status().is_success() {
-            continue;
-        }
-        let parsed: ItemsResponse = match resp.json().await {
-            Ok(p) => p,
-            Err(_) => continue,
-        };
-        if let Some(item) = parsed
-            .items
-            .into_iter()
-            .find(|i| i.path.as_deref().map(|p| p.to_lowercase()) == Some(target.clone()))
-        {
-            return Ok(Some(item.id));
+        if let Ok(Some(id)) = lookup_item_by_path(client, base_url, api_key, file_path).await {
+            return Ok(Some(id));
         }
     }
     Ok(None)
+}
+
+/// Single lookup, for when the file should already be in the library.
+pub async fn lookup_item_by_path(
+    client: &reqwest::Client,
+    base_url: &str,
+    api_key: &str,
+    file_path: &str,
+) -> Result<Option<String>, String> {
+    let url = format!(
+        "{}/Items?Recursive=true&IncludeItemTypes=Episode,Movie&Fields=Path",
+        base_url.trim_end_matches('/')
+    );
+    let target = file_path.to_lowercase();
+    let resp = client
+        .get(&url)
+        .header("X-Emby-Token", api_key)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("Jellyfin: {}", resp.status()));
+    }
+    let parsed: ItemsResponse = resp.json().await.map_err(|e| e.to_string())?;
+    Ok(parsed
+        .items
+        .into_iter()
+        .find(|i| i.path.as_deref().map(|p| p.to_lowercase()) == Some(target.clone()))
+        .map(|i| i.id))
 }
 
 pub async fn delete_item(

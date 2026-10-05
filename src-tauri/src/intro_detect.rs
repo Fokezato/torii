@@ -17,6 +17,7 @@ const TAIL_SECS: f64 = 7.0 * 60.0;
 const MIN_SEGMENT_SECS: f64 = 30.0;
 const MAX_SEGMENT_SECS: f64 = 150.0;
 const MAX_CHAPTER_SECS: f64 = 180.0;
+const MAX_ENDING_CHAPTER_SECS: f64 = 200.0;
 const REFERENCES: usize = 2;
 
 fn frame_secs() -> f64 {
@@ -246,25 +247,63 @@ fn chapter_segments(ffprobe: &Path, file: &Path) -> Found {
     let Ok(probe) = serde_json::from_slice::<ChaptersProbe>(&out.stdout) else {
         return Found::default();
     };
-    let intro_re = regex::Regex::new(r"(?i)^\s*(op|opening|intro|abertura)\b").unwrap();
+    let chapters: Vec<(String, f64, f64)> = probe
+        .chapters
+        .into_iter()
+        .filter_map(|c| {
+            let title = c.tags.get("title").cloned().unwrap_or_default();
+            Some((title, c.start_time.parse().ok()?, c.end_time.parse().ok()?))
+        })
+        .collect();
+    pick_chapters(&chapters)
+}
+
+/// Groups name chapters differently: some call the opening "Intro", others use
+/// "Intro" for the cold open before an "Opening" chapter. "Opening" always wins;
+/// "Intro" only counts when it lasts as long as an opening song.
+fn pick_chapters(chapters: &[(String, f64, f64)]) -> Found {
+    let opening_re = regex::Regex::new(r"(?i)^\s*(op|opening|abertura)\b").unwrap();
+    let intro_re = regex::Regex::new(r"(?i)^\s*intro\b").unwrap();
     let ending_re = regex::Regex::new(r"(?i)^\s*(ed|ending|credits|outro|encerramento)\b").unwrap();
-    let mut found = Found::default();
-    for c in probe.chapters {
-        let title = c.tags.get("title").map(String::as_str).unwrap_or("");
-        let (Ok(start), Ok(end)) = (c.start_time.parse::<f64>(), c.end_time.parse::<f64>()) else {
-            continue;
-        };
-        if !(MIN_SEGMENT_SECS..=MAX_CHAPTER_SECS).contains(&(end - start)) {
-            continue;
-        }
-        let range = ((start * 1000.0).round() as i64, (end * 1000.0).round() as i64);
-        if found.intro.is_none() && intro_re.is_match(title) {
-            found.intro = Some(range);
-        } else if found.ending.is_none() && ending_re.is_match(title) {
-            found.ending = Some(range);
-        }
+    let ms = |start: f64, end: f64| ((start * 1000.0).round() as i64, (end * 1000.0).round() as i64);
+    let find = |re: &regex::Regex, len: std::ops::RangeInclusive<f64>| {
+        chapters
+            .iter()
+            .find(|(title, start, end)| re.is_match(title) && len.contains(&(end - start)))
+            .map(|(_, start, end)| ms(*start, *end))
+    };
+    Found {
+        intro: find(&opening_re, MIN_SEGMENT_SECS..=MAX_CHAPTER_SECS).or_else(|| find(&intro_re, 75.0..=110.0)),
+        ending: find(&ending_re, MIN_SEGMENT_SECS..=MAX_ENDING_CHAPTER_SECS),
     }
-    found
+}
+
+/// Opening/ending chapters of one file, read when the player opens it. Empty when
+/// ffmpeg isn't installed yet or the file has no such chapters.
+pub async fn file_chapters(app: &AppHandle, path: &str) -> db::skip_segments::SkipSegments {
+    static CACHE: std::sync::LazyLock<std::sync::Mutex<HashMap<String, Found>>> =
+        std::sync::LazyLock::new(Default::default);
+    let cached = CACHE.lock().unwrap().get(path).copied();
+    let found = match cached {
+        Some(found) => found,
+        None => {
+            let Some(paths) = ffmpeg::installed(app) else { return Default::default() };
+            let file = PathBuf::from(path);
+            let read = tauri::async_runtime::spawn_blocking(move || chapter_segments(&paths.ffprobe, &file));
+            let Ok(Ok(found)) = tokio::time::timeout(std::time::Duration::from_secs(5), read).await else {
+                return Default::default();
+            };
+            CACHE.lock().unwrap().insert(path.to_string(), found);
+            found
+        }
+    };
+    db::skip_segments::SkipSegments {
+        intro_start_ms: found.intro.map(|r| r.0),
+        intro_end_ms: found.intro.map(|r| r.1),
+        ending_start_ms: found.ending.map(|r| r.0),
+        ending_end_ms: found.ending.map(|r| r.1),
+        ..Default::default()
+    }
 }
 
 struct EpisodeAudio {
@@ -451,6 +490,25 @@ mod tests {
 
     fn secs(s: f64) -> usize {
         (s * SAMPLE_RATE as f64) as usize
+    }
+
+    fn chapters(list: &[(&str, f64, f64)]) -> Vec<(String, f64, f64)> {
+        list.iter().map(|(t, s, e)| (t.to_string(), *s, *e)).collect()
+    }
+
+    #[test]
+    fn intro_chapter_is_the_opening_only_when_it_looks_like_one() {
+        // "Intro" is the opening (VARYG).
+        let found = pick_chapters(&chapters(&[("Scene 1", 0.0, 175.0), ("Intro", 175.0, 265.0), ("Credits", 1244.0, 1334.0)]));
+        assert_eq!(found.intro, Some((175_000, 265_000)));
+        assert_eq!(found.ending, Some((1_244_000, 1_334_000)));
+        // "Intro" is the cold open, "Opening" is the song (LostYears).
+        let found = pick_chapters(&chapters(&[("Intro", 0.0, 157.0), ("Opening", 157.0, 247.0), ("Part A", 247.0, 1095.0)]));
+        assert_eq!(found.intro, Some((157_000, 247_000)));
+        // A short cold open named "Intro" with no opening at all.
+        let found = pick_chapters(&chapters(&[("Intro", 0.0, 65.0), ("Part A", 65.0, 642.0), ("Ending", 1301.0, 1391.0)]));
+        assert_eq!(found.intro, None);
+        assert_eq!(found.ending, Some((1_301_000, 1_391_000)));
     }
 
     #[test]
