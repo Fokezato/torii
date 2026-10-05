@@ -1,6 +1,6 @@
 [package]
 name = "torii"
-version = "0.6.1"
+version = "0.7.0"
 description = "Your anime hub"
 authors = ["Fokezato"]
 edition = "2021"
