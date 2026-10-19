@@ -53,6 +53,10 @@ pub async fn create_watch(
                 state.activity.error(tr!("Erro ao criar placeholder do episódio {ep}: {e}", "Failed to create placeholder for episode {ep}: {e}"));
             }
         }
+    } else if let Some(anilist_id) = created.anilist_id {
+        if let Ok(summaries) = crate::sources::anilist::by_ids(&state.http, &[anilist_id as i32]).await {
+            engine::sync_airing_placeholders(&state, std::slice::from_ref(&created), &summaries).await;
+        }
     }
 
     let watch_id = created.id;

@@ -1271,6 +1271,21 @@ pub async fn backfill_placeholder_episodes(app: AppHandle) {
     }
 }
 
+/// Airing shows without a known total: placeholders up to the next episode to air.
+pub async fn sync_airing_placeholders(state: &AppState, watches: &[db::watches::Watch], summaries: &[crate::sources::anilist::AnimeSummary]) {
+    for s in summaries {
+        let Some(last) = s.episodes.or(s.next_airing_episode) else { continue };
+        for w in watches.iter().filter(|w| w.anilist_id == Some(s.anilist_id as i64) && w.episodes.is_none()) {
+            if w.format.as_deref() == Some("MOVIE") {
+                continue;
+            }
+            for ep in 1..=last as i64 {
+                let _ = db::episodes::create_placeholder(&state.db, w.id, &w.folder, ep).await;
+            }
+        }
+    }
+}
+
 pub async fn backfill_series(app: AppHandle) {
     let state = app.state::<AppState>();
     let Ok(watches) = db::watches::list(&state.db).await else {

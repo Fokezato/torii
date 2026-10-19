@@ -35,6 +35,7 @@ async fn airing_today(app: &AppHandle, state: &AppState) {
         return;
     }
     if let Ok(summaries) = anilist::by_ids(&state.http, &ids).await {
+        crate::engine::sync_airing_placeholders(state, &watches, &summaries).await;
         for s in summaries {
             if let (Some(at), Some(ep)) = (s.next_airing_at, s.next_airing_episode) {
                 let _ = sqlx::query(
