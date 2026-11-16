@@ -26,7 +26,6 @@ pub struct NyaaCandidate {
 pub struct MatchResult {
     pub matched: Vec<EpisodeMatch>,
     pub all_new: Vec<NyaaCandidate>,
-    /// Releases without an episode number (season packs) that passed every filter.
     pub batches: Vec<NyaaCandidate>,
     pub rejected: Rejections,
 }
@@ -38,7 +37,6 @@ pub struct Rejections {
     pub range: usize,
     pub other_work: usize,
     pub language: usize,
-    /// Movie searches: episodes and season packs.
     pub not_movie: usize,
 }
 
@@ -208,7 +206,6 @@ fn title_matches_season(title: &str, season: u32) -> bool {
 }
 
 static SXXEYY: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)S(\d{1,2})E(\d{1,3})").unwrap());
-// "Show - 05 [1080p]", "Show - 12v2 (WEB)", "Show - 05.mkv"
 static DASH_EPISODE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\s-\s(\d{1,4})(?:v\d+)?(?:\s*[\[(]|\s*\.[a-z0-9]{2,4}$|\s*$)").unwrap()
 });
@@ -236,7 +233,6 @@ fn normalize_words(text: &str) -> String {
     mapped.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// A release that is a single episode or a season pack, not a movie.
 pub fn is_episodic_release(title: &str) -> bool {
     static SERIES: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r"(?i)\b(?:batch|complete|season|s\d{1,2}|\d{1,3}\s?[-~]\s?\d{1,3}|episodes?)\b").unwrap()
@@ -244,7 +240,6 @@ pub fn is_episodic_release(title: &str) -> bool {
     extract_episode_number(title).is_some() || SERIES.is_match(title)
 }
 
-/// The movie file inside a release: the largest video, skipping extras.
 pub fn movie_file<'a>(files: &'a [crate::torrent_engine::PackFile]) -> Option<&'a crate::torrent_engine::PackFile> {
     static EXTRA: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r"(?i)\b(?:extras?|specials?|bonus|nc ?op|nc ?ed|creditless|menus?|pv|previews?|trailers?|sample)\b").unwrap()
@@ -258,9 +253,6 @@ pub fn movie_file<'a>(files: &'a [crate::torrent_engine::PackFile]) -> Option<&'
         .max_by_key(|f| f.len)
 }
 
-/// A release of another work in the same franchise: "Steins;Gate 0", "... The Movie",
-/// "... OVA", or another season. `names` are the anime's own titles; without a match
-/// nothing is rejected.
 pub fn is_other_work(title: &str, names: &[String], season: u32) -> bool {
     const MARKERS: [&str; 10] = ["movie", "film", "gekijouban", "ova", "ovas", "oad", "special", "specials", "zero", "recap"];
     static SEASON_TOKEN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^s(\d{1,2})$").unwrap());
@@ -294,8 +286,6 @@ pub fn is_other_work(title: &str, names: &[String], season: u32) -> bool {
 
 const VIDEO_EXTENSIONS: [&str; 6] = ["mkv", "mp4", "avi", "webm", "m4v", "ts"];
 
-/// Episode number of a file inside a season pack, or `None` for extras, other
-/// seasons/works and non-video files.
 pub fn pack_file_episode(path: &str, names: &[String], season: u32) -> Option<u32> {
     static EXTRA_DIR: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r"(?i)\b(?:extras?|specials?|bonus|ova|oad|nc ?op|nc ?ed|creditless|menus?|pv|previews?|trailers?|scans|fonts)\b").unwrap()
@@ -307,8 +297,6 @@ pub fn pack_file_episode(path: &str, names: &[String], season: u32) -> Option<u3
     if !VIDEO_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str()) {
         return None;
     }
-    // The pack's root folder often reads like "Show (S1 + OVA + Movie)": folders named
-    // after the anime are not treated as extras.
     let named_after_anime = |dir: &str| {
         let dir = normalize_words(dir);
         names.iter().map(|n| normalize_words(n)).any(|n| !n.is_empty() && dir.contains(&n))
@@ -349,8 +337,6 @@ pub fn matches_quality(title: &str, quality: &str) -> bool {
     Regex::new(&pattern).map(|r| r.is_match(title)).unwrap_or(true)
 }
 
-/// Release page text and magnet. Errors (including Nyaa's rate limiting) are reported
-/// as such, never as an empty description: that would read as "language missing".
 async fn fetch_detail(client: &reqwest::Client, view_url: &str) -> Result<(String, Option<String>), String> {
     let mut attempt = 0;
     let html = loop {
@@ -439,8 +425,6 @@ fn language_matches(line_lower: &str, canonical: &str) -> bool {
         .is_some_and(|(_, aliases)| aliases.iter().any(|a| line_lower.contains(a)))
 }
 
-/// (language, search tag, lowercase markers in release titles). Releases in other
-/// languages usually state it in the title and sit in the "non-English" category.
 const TITLE_TAGS: &[(&str, &str, &[&str])] = &[
     ("Portuguese (Brazil)", "PT-BR", &["pt-br", "ptbr", "pt br", "legendado", "dublado", "português"]),
     ("Spanish (Latin America)", "Latino", &["latino", "esp-lat", "spa-lat", "español latino"]),
@@ -468,8 +452,6 @@ fn title_has_language(title_lower: &str, language: &str) -> bool {
     title_tags(language).is_some_and(|(_, _, markers)| markers.iter().any(|m| title_lower.contains(m)))
 }
 
-/// Extra searches for anime filtered by a non-English language: the non-English
-/// category, and the query with the language tag across all anime.
 fn language_searches(query: &str, audio_langs: &[String], sub_langs: &[String]) -> Vec<(String, &'static str)> {
     let tags: Vec<&str> = audio_langs
         .iter()
@@ -505,8 +487,6 @@ async fn with_language_searches(
     base
 }
 
-/// Language filters satisfied by the release page's description or, failing that,
-/// by tags in the title ("[PT-BR]", "Legendado", "Dublado").
 pub fn matches_language(description: &str, title: &str, audio_langs: &[String], sub_langs: &[String]) -> bool {
     let title = title.to_lowercase();
     let dubbed = DUB_MARKERS.iter().any(|m| title.contains(m));
@@ -711,7 +691,6 @@ pub async fn find_new_matches(
     let audio_langs = audio_langs.to_vec();
     let sub_langs = sub_langs.to_vec();
 
-    // Ok(Some) = language matches, Ok(None) = it doesn't, Err = page couldn't be read.
     let checked: Vec<Result<Option<NyaaCandidate>, String>> = stream::iter(new_candidates.clone())
         .map(|mut candidate| {
             let client = client.clone();
@@ -731,8 +710,6 @@ pub async fn find_new_matches(
         .collect()
         .await;
 
-    // Releases that couldn't be checked are left out of `all_new`, so they are not
-    // marked as seen and get checked again on the next search.
     let unchecked: HashSet<String> = checked.iter().filter_map(|r| r.as_ref().err().cloned()).collect();
     let matched: Vec<NyaaCandidate> = checked.into_iter().filter_map(|r| r.ok().flatten()).collect();
     let all_new: Vec<NyaaCandidate> = new_candidates.into_iter().filter(|c| !unchecked.contains(&c.id)).collect();

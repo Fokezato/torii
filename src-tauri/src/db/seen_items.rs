@@ -1,7 +1,6 @@
 use sqlx::SqlitePool;
 use std::collections::HashSet;
 
-/// Rejected releases are evaluated again (after the anime's filters change).
 pub async fn forget_rejected(pool: &SqlitePool, watch_id: i64) -> Result<(), sqlx::Error> {
     sqlx::query("DELETE FROM seen_items WHERE watch_id = ? AND matched = 0")
         .bind(watch_id)
@@ -10,7 +9,6 @@ pub async fn forget_rejected(pool: &SqlitePool, watch_id: i64) -> Result<(), sql
     Ok(())
 }
 
-/// Every release is evaluated again (a deleted movie being downloaded again).
 pub async fn forget_all(pool: &SqlitePool, watch_id: i64) -> Result<(), sqlx::Error> {
     sqlx::query("DELETE FROM seen_items WHERE watch_id = ?")
         .bind(watch_id)

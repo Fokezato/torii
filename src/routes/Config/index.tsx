@@ -164,8 +164,6 @@ function PathRow({
   );
 }
 
-
-
 const NOTIFICATION_TYPES = [
   { id: "notify_found", key: "found" },
   { id: "notify_calendar", key: "calendar" },
@@ -218,7 +216,6 @@ const CREDITS: { name: string; role: "tauri" | "vlc" | "ffmpeg" | "librqbit" | "
   { name: "React, Tailwind CSS, shadcn/ui, Lucide", role: "ui", license: "MIT/ISC" },
 ];
 
-
 const ANY_JELLYFIN_USER = "__any__";
 
 export default function Config() {
@@ -236,7 +233,6 @@ export default function Config() {
     queryFn: getSettings,
     refetchOnWindowFocus: false,
   });
-
 
   const { data: appVersion } = useQuery({ queryKey: ["app-version"], queryFn: getVersion, staleTime: Infinity });
   const { data: jellyfinUserList } = useQuery({

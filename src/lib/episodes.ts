@@ -22,11 +22,9 @@ export interface Episode {
   watch_position_ms: number | null;
   watched_at: string | null;
   watch_progress_at: string | null;
-  /** File inside a season pack; null = single-episode torrent. */
   file_index: number | null;
 }
 
-/** Episodes downloaded from the same season pack share this key. */
 export function packKey(ep: Episode): string | null {
   return ep.file_index != null && ep.source_item_id ? `${ep.watch_id}:${ep.source_item_id}` : null;
 }
@@ -99,7 +97,6 @@ export async function episodePrefetchNext(watchId: number, episodeNumber: number
   return invoke<void>("episode_prefetch_next", { watchId, episodeNumber });
 }
 
-/** Deletes the episode's file and marks it removed: it is not downloaded again automatically. */
 export async function setEpisodeWatched(episodeId: number, watched: boolean): Promise<void> {
   return invoke<void>("set_episode_watched", { episodeId, watched });
 }

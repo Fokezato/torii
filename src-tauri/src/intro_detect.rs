@@ -258,9 +258,6 @@ fn chapter_segments(ffprobe: &Path, file: &Path) -> Found {
     pick_chapters(&chapters)
 }
 
-/// Groups name chapters differently: some call the opening "Intro", others use
-/// "Intro" for the cold open before an "Opening" chapter. "Opening" always wins;
-/// "Intro" only counts when it lasts as long as an opening song.
 fn pick_chapters(chapters: &[(String, f64, f64)]) -> Found {
     let opening_re = regex::Regex::new(r"(?i)^\s*(op|opening|abertura)\b").unwrap();
     let intro_re = regex::Regex::new(r"(?i)^\s*intro\b").unwrap();
@@ -278,8 +275,6 @@ fn pick_chapters(chapters: &[(String, f64, f64)]) -> Found {
     }
 }
 
-/// Opening/ending chapters of one file, read when the player opens it. Empty when
-/// ffmpeg isn't installed yet or the file has no such chapters.
 pub async fn file_chapters(app: &AppHandle, path: &str) -> db::skip_segments::SkipSegments {
     static CACHE: std::sync::LazyLock<std::sync::Mutex<HashMap<String, Found>>> =
         std::sync::LazyLock::new(Default::default);
@@ -498,14 +493,11 @@ mod tests {
 
     #[test]
     fn intro_chapter_is_the_opening_only_when_it_looks_like_one() {
-        // "Intro" is the opening (VARYG).
         let found = pick_chapters(&chapters(&[("Scene 1", 0.0, 175.0), ("Intro", 175.0, 265.0), ("Credits", 1244.0, 1334.0)]));
         assert_eq!(found.intro, Some((175_000, 265_000)));
         assert_eq!(found.ending, Some((1_244_000, 1_334_000)));
-        // "Intro" is the cold open, "Opening" is the song (LostYears).
         let found = pick_chapters(&chapters(&[("Intro", 0.0, 157.0), ("Opening", 157.0, 247.0), ("Part A", 247.0, 1095.0)]));
         assert_eq!(found.intro, Some((157_000, 247_000)));
-        // A short cold open named "Intro" with no opening at all.
         let found = pick_chapters(&chapters(&[("Intro", 0.0, 65.0), ("Part A", 65.0, 642.0), ("Ending", 1301.0, 1391.0)]));
         assert_eq!(found.intro, None);
         assert_eq!(found.ending, Some((1_301_000, 1_391_000)));

@@ -7,8 +7,6 @@ use tokio::sync::Mutex;
 const ADD_TORRENT_TIMEOUT: Duration = Duration::from_secs(45);
 const INIT_TIMEOUT: Duration = Duration::from_secs(120);
 
-/// Episodes map to torrents; several episodes can share one season-pack torrent, each
-/// pointing at its own file (`files`). Only the files of tracked episodes are downloaded.
 pub struct TorrentEngine {
     session: Arc<Session>,
     active: Mutex<HashMap<i64, Arc<ManagedTorrent>>>,
@@ -35,7 +33,6 @@ impl TorrentEngine {
         Ok(Self { session, active: Mutex::new(HashMap::new()), files: Mutex::new(HashMap::new()) })
     }
 
-    /// `file_index`: the episode's file inside a season pack; `None` = single-episode torrent.
     pub async fn add_download(
         &self,
         episode_id: i64,
@@ -82,7 +79,6 @@ impl TorrentEngine {
         Ok(info_hash)
     }
 
-    /// Files of a torrent without downloading it.
     pub async fn list_files(&self, magnet: &str) -> anyhow::Result<Vec<PackFile>> {
         let opts = AddTorrentOptions { list_only: true, ..Default::default() };
         let response =
@@ -117,8 +113,6 @@ impl TorrentEngine {
         Ok(files)
     }
 
-    /// librqbit refuses to change the file selection while a torrent is still checking
-    /// its files, which happens right after a pack is added.
     async fn update_files(&self, handle: &Arc<ManagedTorrent>, wanted: &HashSet<usize>) -> anyhow::Result<()> {
         let _ = tokio::time::timeout(INIT_TIMEOUT, handle.wait_until_initialized()).await;
         self.session.update_only_files(handle, wanted).await
@@ -140,7 +134,6 @@ impl TorrentEngine {
         Ok(())
     }
 
-    /// Per-episode stats; for season packs, progress and completion of the episode's file.
     pub async fn snapshot(&self) -> Vec<(i64, TorrentStats)> {
         let active = self.active.lock().await;
         let files = self.files.lock().await;
@@ -193,8 +186,6 @@ impl TorrentEngine {
         Some(handle.output_folder().join(&file.relative_filename))
     }
 
-    /// Stops tracking the episode. A pack shared with other episodes keeps running
-    /// without this episode's file (deleted from disk when `delete_files`).
     pub async fn remove(&self, episode_id: i64, delete_files: bool) -> anyhow::Result<()> {
         let path = if delete_files { self.primary_file_path(episode_id).await } else { None };
         let mut active = self.active.lock().await;

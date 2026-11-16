@@ -29,9 +29,7 @@ pub struct Watch {
     pub series_anilist_id: Option<i64>,
     pub series_title: Option<String>,
     pub streaming: bool,
-    /// `None` = follow the global setting.
     pub delete_after_watched: Option<bool>,
-    /// AniList format: TV, MOVIE, OVA...
     pub format: Option<String>,
     pub season_number: Option<i64>,
 }

@@ -23,9 +23,7 @@ export type EpisodeGroup = "watched" | "ready" | "waiting" | "other";
 export interface EpisodeView {
   label: string;
   tone: Tone;
-  /** Small second line: file state, missing filters, error. */
   detail?: string;
-  /** Watch progress 0–1, for the bar under in-progress episodes. */
   watchProgress?: number;
   group: EpisodeGroup;
   playable: boolean;
@@ -42,7 +40,6 @@ function clock(ms: number): string {
   return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${s}` : `${m}:${s}`;
 }
 
-/** The anime's filters still waiting to be met, e.g. "audio Portuguese (Brazil) · 1080p". */
 export function pendingFilters(watch: Watch): string[] {
   const out: string[] = [];
   for (const lang of watch.audio_lang?.split(",").filter(Boolean) ?? []) {
@@ -68,7 +65,6 @@ function fileDetail(ep: Episode, downloadPct?: number): string | undefined {
   }
 }
 
-/// Watching comes first: a watched episode reads "Watched" even if its file is gone.
 export function episodeView(
   ep: Episode,
   watch: Watch,
@@ -123,7 +119,6 @@ export function episodeView(
         : { label: t("epView.removed"), tone: "removed", group: "other", playable: false };
   }
 
-  // pending
   if (ctx.airingAt != null && ctx.airingAt * 1000 > ctx.now) {
     const date = new Date(ctx.airingAt * 1000).toLocaleDateString(currentLocale(), { day: "2-digit", month: "2-digit" });
     return { label: t("epView.airs", { date }), tone: "airing", group: "waiting", playable: false };

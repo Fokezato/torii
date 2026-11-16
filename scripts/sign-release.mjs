@@ -1,4 +1,3 @@
-// Signs the CI draft release, writes latest.json and publishes it. Usage: npm run release:sign -- vX.Y.Z
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";

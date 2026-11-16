@@ -49,7 +49,6 @@ export function usePlayerHost(
         .then((full) => (full ? getCurrentWindow().setFullscreen(false) : undefined))
         .catch(() => {});
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -93,6 +92,5 @@ export function usePlayerHost(
       clearInterval(resyncInterval);
       playerSetVideoArea(-2000, -2000, 1, 1, -2000, -2000).catch(() => {});
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 }

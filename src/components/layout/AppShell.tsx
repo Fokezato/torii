@@ -15,7 +15,6 @@ const NAV_ITEMS = [
   { to: "/downloads", labelKey: "nav.downloads", end: false, icon: Download },
 ] as const;
 
-// Rendered in a portal: the Explore button lives inside an overflow-hidden animation wrapper.
 function SideTooltip({ label, children }: { label: string; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);

@@ -20,7 +20,6 @@ export function TopBar() {
 
   useEffect(() => {
     setTerm("");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname]);
 
   const placeholderKey = PLACEHOLDER_BY_ROUTE[location.pathname as keyof typeof PLACEHOLDER_BY_ROUTE];

@@ -22,7 +22,6 @@ function Field({ label, hint, children }: { label: string; hint: string; childre
   );
 }
 
-/// First run: welcome with the essential settings, then the guided tour.
 export function Onboarding() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -40,7 +39,6 @@ export function Onboarding() {
 
   const runTour = () => {
     navigate("/");
-    // Home's anchors need a moment to mount after navigating.
     setTimeout(() => startTour(finish), 400);
   };
 
@@ -48,7 +46,6 @@ export function Onboarding() {
     const onRequest = () => runTour();
     window.addEventListener(START_TOUR_EVENT, onRequest);
     return () => window.removeEventListener(START_TOUR_EVENT, onRequest);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function pickFolder() {

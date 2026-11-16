@@ -506,7 +506,6 @@ function PackBanner({ episodes }: { episodes: Episode[] }) {
   );
 }
 
-/// One banner per season pack in use by this season's episodes.
 function PackBanners({ episodes }: { episodes: Episode[] }) {
   const groups = new Map<string, Episode[]>();
   for (const e of episodes) {
@@ -533,7 +532,6 @@ function useEpisodeMedia(episode: Episode | undefined) {
     staleTime: Infinity,
     retry: false,
   });
-  // Same 30% point as the player's episode panel, so the frame cache is shared.
   const frameAt = probe && probe.duration_ms > 0 ? Math.round(probe.duration_ms * 0.3) : null;
   const { data: frame } = useQuery({
     queryKey: ["media-frame", localPath, frameAt],

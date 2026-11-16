@@ -79,7 +79,6 @@ fn non_empty(s: Option<String>) -> Option<String> {
     s.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
 }
 
-/// Per-episode title, synopsis and thumbnail. Empty when Kitsu has no data for the show.
 pub async fn episodes(client: &reqwest::Client, anilist_id: i64) -> Result<Vec<EpisodeMeta>, String> {
     if let Some((at, hit)) = CACHE.lock().unwrap().get(&anilist_id) {
         if at.elapsed() < CACHE_TTL {

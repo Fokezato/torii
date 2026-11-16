@@ -68,7 +68,6 @@ import {
 
 const IDLE_HIDE_MS = 3000;
 const SKIP_MS = 10_000;
-// The skip button shows up a bit before the segment, so it is there when it starts.
 const SKIP_BUTTON_LEAD_MS = 1_000;
 const SEEK_SETTLE_MS = 1500;
 
@@ -874,7 +873,6 @@ function SeekBar({
     }
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => fetchLatest(previewSource), 120);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [previewSource, hoverBucket]);
 
   useEffect(() => setPreview(null), [previewSource]);
@@ -1166,7 +1164,6 @@ function EpisodesPanel({
     if (!open) return;
     const current = sorted.find((e) => currentEpisode != null && numberOf(e) === currentEpisode);
     if (current) setExpandedId(current.id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, currentEpisode, episodes.length]);
 
   function play(ep: Episode) {

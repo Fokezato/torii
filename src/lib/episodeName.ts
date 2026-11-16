@@ -2,7 +2,6 @@ import { seasonTabLabel } from "@/lib/anilist";
 import { t } from "@/i18n";
 
 const SXXEYY = /S(\d{1,2})E(\d{1,3})/i;
-// "Show - 01 [1080p]", "Show - 12v2 (WEB)"
 const DASH_EPISODE = /\s-\s(\d{1,4})(?:v\d)?(?=\s*[[(]|\s*$)/;
 const VIDEO_EXTENSIONS = /\.(mkv|mp4|avi|webm|mov|m4v|wmv|flv|ts)$/i;
 
@@ -20,7 +19,6 @@ export function isMovie(watch: { format?: string | null } | null | undefined): b
   return watch?.format === "MOVIE";
 }
 
-/** Like `parseEpisodeLabel`, but a movie's only episode reads "Movie". */
 export function episodeLabelOf(
   watch: { format?: string | null } | null | undefined,
   rawName: string | null,

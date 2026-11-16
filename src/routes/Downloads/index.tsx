@@ -490,7 +490,6 @@ export default function Downloads() {
 
   const clearable = visibleEpisodes.filter((e) => e.status === "available");
 
-  // A pack reports the same torrent speed on each of its episodes: count it once.
   const torrentProgress = useMemo(() => {
     const byTorrent = new Map<string, DownloadProgress>();
     for (const e of episodes) {

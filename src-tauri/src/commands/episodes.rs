@@ -46,7 +46,6 @@ pub async fn cancel_episode_download(
     Ok(())
 }
 
-/// Manual watched toggle from the episode menu. Unwatching also clears the resume point.
 #[tauri::command]
 pub async fn set_episode_watched(state: State<'_, AppState>, episode_id: i64, watched: bool) -> Result<(), AppError> {
     if watched {

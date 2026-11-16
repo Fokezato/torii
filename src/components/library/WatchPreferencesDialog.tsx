@@ -171,7 +171,6 @@ export function WatchPreferencesDialog({ watch, onOpenChange }: WatchPreferences
                 />
               </div>
 
-
               <div className="flex items-center justify-between gap-5">
                 <span className="text-[13px] font-semibold">{t("preferences.notifyReady")}</span>
                 <Switch checked={notify} onCheckedChange={setNotify} />

@@ -66,7 +66,6 @@ async fn airing_today(app: &AppHandle, state: &AppState) {
             .bind(episode)
             .execute(&state.db)
             .await;
-        // Missed while the app was closed for more than a day: stay quiet.
         if now - airing_at > 24 * 3600 {
             continue;
         }

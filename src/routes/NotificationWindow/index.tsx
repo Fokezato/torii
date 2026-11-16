@@ -50,7 +50,6 @@ export default function NotificationWindow() {
     return () => {
       unlisten.then((fn) => fn());
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (!current) return null;

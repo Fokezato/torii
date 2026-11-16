@@ -33,7 +33,6 @@ export async function mediaProbe(path: string): Promise<MediaProbe> {
   return invoke("media_probe", { path });
 }
 
-/** Resolution from the probe, else the quality tag in the release name. */
 export function videoQuality(probe: MediaProbe | undefined, releaseName: string | null): string | null {
   if (probe && probe.width > 0) {
     if (probe.width >= 3800) return "4K";

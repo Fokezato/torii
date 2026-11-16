@@ -257,11 +257,8 @@ pub async fn player_get_skip_segments(
     watch_id: i64,
     episode_number: i64,
 ) -> Result<SkipSegments, AppError> {
-    // Chapters are marked in this exact file, so they win over AniSkip's shared timings.
     let mut segments = file_chapter_segments(&app, &app_state, watch_id, episode_number).await;
     if !segments.is_complete() {
-        // Answer with what is cached; AniSkip can take many seconds, so it is fetched in
-        // the background and the player is told to ask again.
         let cached = crate::db::skip_segments::get_cached(&app_state.db, watch_id, episode_number).await?;
         let fresh = cached
             .as_ref()

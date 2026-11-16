@@ -27,9 +27,7 @@ export interface Watch {
   series_anilist_id: number | null;
   series_title: string | null;
   streaming: boolean;
-  /** null = follow the global setting. */
   delete_after_watched: boolean | null;
-  /** AniList format: TV, MOVIE, OVA... */
   format: string | null;
 }
 

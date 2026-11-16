@@ -92,7 +92,6 @@ pub async fn find_item_by_path(
     Ok(None)
 }
 
-/// Single lookup, for when the file should already be in the library.
 pub async fn lookup_item_by_path(
     client: &reqwest::Client,
     base_url: &str,
@@ -186,7 +185,6 @@ struct PlayedData {
     last_played: Option<String>,
 }
 
-/// Items among `item_ids` that `user_id` has finished, with when (if Jellyfin knows).
 pub async fn played_items(
     client: &reqwest::Client,
     base_url: &str,

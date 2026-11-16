@@ -6,7 +6,6 @@ import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 
 export interface DeletionRulesValue {
-  /** Days after download; `null` = off. */
   days: number | null;
   afterWatched: boolean;
 }
@@ -46,7 +45,6 @@ function RuleCard({
   );
 }
 
-/// The two ways Torii deletes episodes on its own, same UI in Settings and in an anime's preferences.
 export function DeletionRules({
   value,
   onChange,

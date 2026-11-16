@@ -90,7 +90,6 @@ fn spawn_player_overlay_window(app: &tauri::App, main: &tauri::WebviewWindow) ->
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // libVLC can only embed into X11 windows; run under XWayland on Wayland.
     #[cfg(target_os = "linux")]
     if std::env::var_os("GDK_BACKEND").is_none() {
         std::env::set_var("GDK_BACKEND", "x11");

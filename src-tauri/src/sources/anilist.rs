@@ -161,7 +161,6 @@ struct RawStudio {
     name: String,
 }
 
-/// Drops credits like "(Source: Crunchyroll)" or "[Written by MAL Rewrite]".
 pub fn strip_credits(text: &str) -> String {
     static CREDIT: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
         regex::Regex::new(r"(?i)\s*[(\[]\s*(?:source|written by)\b[^)\]]*[)\]]").unwrap()
@@ -300,7 +299,6 @@ pub async fn catalog(client: &reqwest::Client, filter: &CatalogFilter, page: i32
     if search.is_some() {
         sort.insert(0, "SEARCH_MATCH".to_string());
     }
-    // AniList answers 500 to explicit nulls: only send the filters that are set.
     let mut variables = serde_json::json!({ "page": page, "sort": sort });
     let vars = variables.as_object_mut().unwrap();
     if let Some(search) = search {

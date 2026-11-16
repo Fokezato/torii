@@ -12,7 +12,6 @@ const STEPS = [
   { anchor: "nav-settings", key: "settings", side: "right" },
 ] as const;
 
-/// Guided tour over the main screens. Starts on Home (the anchors live there).
 export function startTour(onDone?: () => void) {
   const tour = driver({
     showProgress: true,
@@ -39,7 +38,6 @@ export function startTour(onDone?: () => void) {
   tour.drive();
 }
 
-/// Other screens (Settings) ask the shell to go Home and start the tour.
 export const START_TOUR_EVENT = "torii:start-tour";
 
 export function requestTour() {

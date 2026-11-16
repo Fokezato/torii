@@ -82,7 +82,6 @@ fn search_queries(watch: &db::watches::Watch) -> Vec<String> {
     queries
 }
 
-/// The anime's own titles, most specific first (see `nyaa::is_other_work`).
 fn watch_names(watch: &db::watches::Watch) -> Vec<String> {
     let mut names = vec![nyaa::split_season(&watch.query).0, nyaa::split_season(&watch.title).0];
     names.extend(watch.series_title.clone());
@@ -143,8 +142,6 @@ fn nothing_matching(
     )
 }
 
-/// Pack episodes that failed to start keep their pack and file; they are retried here
-/// because the pack itself is already marked as seen.
 async fn retry_pack_errors(app: &AppHandle, state: &AppState, watch: &db::watches::Watch) {
     let Ok(episodes) = db::episodes::list_for_watch(&state.db, watch.id).await else { return };
     for ep in episodes.into_iter().filter(|e| e.status == "error") {
@@ -170,8 +167,6 @@ async fn retry_pack_errors(app: &AppHandle, state: &AppState, watch: &db::watche
     }
 }
 
-/// A movie keeps a single episode, number 1. Releases picked up before the watch was
-/// known to be a movie may sit under another number ("S00E16").
 async fn normalize_movie_episodes(state: &AppState, watch: &db::watches::Watch) {
     let Ok(episodes) = db::episodes::list_for_watch(&state.db, watch.id).await else { return };
     let rank = |status: &str| match status {
@@ -191,7 +186,6 @@ async fn normalize_movie_episodes(state: &AppState, watch: &db::watches::Watch) 
     }
 }
 
-/// Movies: the release with the most seeders gives the movie's file to episode 1.
 async fn assign_movie(app: &AppHandle, state: &AppState, watch: &db::watches::Watch, releases: &[nyaa::NyaaCandidate]) -> u32 {
     const MAX_TRIES: usize = 3;
     let Ok(episodes) = db::episodes::list_for_watch(&state.db, watch.id).await else { return 0 };
@@ -249,7 +243,6 @@ async fn assign_movie(app: &AppHandle, state: &AppState, watch: &db::watches::Wa
     0
 }
 
-/// Season packs: episodes still missing get their file from a pack (best seeded first).
 async fn assign_packs(
     app: &AppHandle,
     state: &AppState,
@@ -564,7 +557,6 @@ pub async fn resume_pending_downloads(app: AppHandle) {
 async fn rename_to_clean_filename(state: &AppState, episode_id: i64, watch_id: i64) -> Option<PathBuf> {
     let old_path = state.torrent.primary_file_path(episode_id).await?;
     let _ = db::episodes::set_item_path(&state.db, episode_id, &old_path.to_string_lossy()).await;
-    // Files inside a season pack stay as they are: the pack is still downloading the others.
     if db::episodes::get(&state.db, episode_id).await.is_ok_and(|e| e.file_index.is_some()) {
         return Some(old_path);
     }
@@ -981,8 +973,6 @@ pub async fn poll_once(app: &AppHandle, state: &AppState) {
     }
 }
 
-/// Deletes an episode on request: files, torrent and Jellyfin item. "deleted" is final,
-/// so the poller never downloads it again (only "Download again" does).
 pub async fn delete_episode(state: &AppState, episode_id: i64) -> Result<(), crate::error::AppError> {
     let ep = db::episodes::get(&state.db, episode_id).await?;
     let watch = db::watches::get(&state.db, ep.watch_id).await?;
@@ -1093,12 +1083,9 @@ pub async fn reconcile_missing_files(state: &AppState, episodes: &mut [db::episo
     }
 }
 
-/// Deleted this long after being watched (Torii's player or Jellyfin).
 const WATCHED_DELETE_DELAY: chrono::Duration = chrono::Duration::minutes(30);
 const WATCHED_CHECK_EVERY: Duration = Duration::from_secs(5 * 60);
 
-/// Episodes finished in Jellyfin count as watched in Torii: by the chosen user, or by any
-/// user when none is chosen. Other users' watching is ignored.
 pub async fn sync_jellyfin_watched(state: &AppState) {
     let Ok(settings) = db::settings::get_all(&state.db).await else { return };
     let (true, Some(url), Some(key)) = (
@@ -1150,8 +1137,6 @@ pub async fn sync_jellyfin_watched(state: &AppState) {
     }
 }
 
-/// Watched-state sync and cleanup run more often than searches, so "delete 30 minutes
-/// after watching" holds regardless of the search interval.
 pub fn spawn_watched_cleanup_loop(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         loop {
@@ -1281,7 +1266,6 @@ pub async fn backfill_placeholder_episodes(app: AppHandle) {
     }
 }
 
-/// Airing shows without a known total: placeholders up to the next episode to air.
 pub async fn sync_airing_placeholders(state: &AppState, watches: &[db::watches::Watch], summaries: &[crate::sources::anilist::AnimeSummary]) {
     for s in summaries {
         let Some(last) = s.episodes.or(s.next_airing_episode) else { continue };
