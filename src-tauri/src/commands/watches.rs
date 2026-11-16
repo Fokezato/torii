@@ -14,7 +14,13 @@ pub async fn list_watches(state: State<'_, AppState>) -> Result<Vec<Watch>, AppE
     Ok(db::watches::list(&state.db).await?)
 }
 
-pub async fn resolve_series(http: &reqwest::Client, anilist_id: i64) -> Option<(i64, String)> {
+pub struct Series {
+    pub anilist_id: i64,
+    pub title: String,
+    pub season_number: Option<i64>,
+}
+
+pub async fn resolve_series(http: &reqwest::Client, anilist_id: i64) -> Option<Series> {
     let seasons = tokio::time::timeout(
         std::time::Duration::from_secs(10),
         crate::sources::anilist::franchise_seasons(http, anilist_id as i32),
@@ -23,7 +29,11 @@ pub async fn resolve_series(http: &reqwest::Client, anilist_id: i64) -> Option<(
     .ok()?
     .ok()?;
     let root = seasons.first()?;
-    Some((root.anilist_id as i64, crate::sources::nyaa::split_season(&root.title).0))
+    Some(Series {
+        anilist_id: root.anilist_id as i64,
+        title: crate::sources::nyaa::split_season(&root.title).0,
+        season_number: seasons.iter().position(|s| s.anilist_id as i64 == anilist_id).map(|i| i as i64 + 1),
+    })
 }
 
 #[tauri::command]
@@ -33,9 +43,10 @@ pub async fn create_watch(
     mut watch: NewWatch,
 ) -> Result<Watch, AppError> {
     if let Some(anilist_id) = watch.anilist_id {
-        if let Some((series_id, series_title)) = resolve_series(&state.http, anilist_id).await {
-            watch.series_anilist_id = Some(series_id);
-            watch.series_title = Some(series_title);
+        if let Some(series) = resolve_series(&state.http, anilist_id).await {
+            watch.series_anilist_id = Some(series.anilist_id);
+            watch.series_title = Some(series.title);
+            watch.season_number = series.season_number;
         }
     }
     if watch.format.as_deref() == Some("MOVIE") {

@@ -649,7 +649,7 @@ fn group_best_per_episode(candidates: Vec<NyaaCandidate>) -> Vec<EpisodeMatch> {
 #[allow(clippy::too_many_arguments)]
 pub async fn find_new_matches(
     client: &reqwest::Client,
-    query: &str,
+    queries: &[String],
     names: &[String],
     quality: &str,
     audio_langs: &[String],
@@ -659,16 +659,25 @@ pub async fn find_new_matches(
     seen_ids: &HashSet<String>,
     movie: bool,
 ) -> Result<MatchResult, String> {
-    let (search_query, season) = if movie { (query.to_string(), None) } else { split_season(query) };
-    let all = search(client, &search_query).await?;
-    let all = match season {
-        Some(s) => search_with_episode_probes(client, &search_query, s, episode_start, episode_end, all).await,
-        None => all,
-    };
-    let all = with_language_searches(client, &search_query, audio_langs, sub_langs, all).await;
+    let mut all: Vec<(NyaaCandidate, Option<u32>)> = Vec::new();
+    let mut found_ids: HashSet<String> = HashSet::new();
+    for (i, query) in queries.iter().enumerate() {
+        let (search_query, season) = if movie { (query.to_string(), None) } else { split_season(query) };
+        let found = match search(client, &search_query).await {
+            Ok(found) => found,
+            Err(e) if i == 0 => return Err(e),
+            Err(_) => continue,
+        };
+        let found = match season {
+            Some(s) => search_with_episode_probes(client, &search_query, s, episode_start, episode_end, found).await,
+            None => found,
+        };
+        let found = with_language_searches(client, &search_query, audio_langs, sub_langs, found).await;
+        all.extend(found.into_iter().filter(|c| found_ids.insert(c.id.clone())).map(|c| (c, season)));
+    }
     let mut rejected = Rejections::default();
     let mut new_candidates = Vec::new();
-    for c in all.into_iter().filter(|c| !seen_ids.contains(&c.id)) {
+    for (c, season) in all.into_iter().filter(|(c, _)| !seen_ids.contains(&c.id)) {
         if !matches_quality(&c.title, quality) {
             rejected.quality += 1;
         } else if movie {
@@ -732,6 +741,24 @@ pub async fn find_new_matches(
 }
 
 pub async fn find_best_for_episode(
+    client: &reqwest::Client,
+    queries: &[String],
+    quality: &str,
+    audio_langs: &[String],
+    sub_langs: &[String],
+    episode_number: u32,
+) -> Result<Option<EpisodeMatch>, String> {
+    for (i, query) in queries.iter().enumerate() {
+        match best_for_episode(client, query, quality, audio_langs, sub_langs, episode_number).await {
+            Ok(Some(found)) => return Ok(Some(found)),
+            Err(e) if i == 0 => return Err(e),
+            _ => {}
+        }
+    }
+    Ok(None)
+}
+
+async fn best_for_episode(
     client: &reqwest::Client,
     query: &str,
     quality: &str,
@@ -1037,6 +1064,20 @@ mod tests {
     fn quality_filter_any_matches_everything() {
         assert!(matches_quality("[Group] Show - 01 [480p]", "any"));
         assert!(matches_quality("[Group] Show - 01 [480p]", ""));
+    }
+
+    #[test]
+    fn later_season_found_through_series_name() {
+        let title = "Tougen Anki S02E04 Child of Kishin Hayate Todoroki 1080p NF WEB-DL MULTi AAC2.0 H.264-VARYG \
+                     (Tougen Anki: Nikko・Kegon no Taki-hen, Multi-Audio, Multi-Subs)";
+        let description = "`Tech Specs:`\n\
+            * `Audios (3):` **Japanese**, AAC 2.0 @ 128 kbps │ **Spanish** (Latin American), AAC 2.0 @ 128 kbps │ **Portuguese** (Brazilian), AAC 2.0 @ 128 kbps\n\
+            * `Subtitles (17):` **English**, SRT │ **Portuguese** (Brazilian), SRT\n";
+        let ptbr = vec!["Portuguese (Brazil)".to_string()];
+        assert!(matches_language(description, title, &ptbr, &[]));
+        assert!(title_matches_season(title, 2));
+        assert!(!is_other_work(title, &names(&["TOUGEN ANKI: Nikko Kegon Falls Arc", "TOUGEN ANKI"]), 2));
+        assert_eq!(extract_episode_number(title), Some(4));
     }
 
     #[test]

@@ -72,6 +72,16 @@ pub(crate) fn split_langs(raw: &Option<String>) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn search_queries(watch: &db::watches::Watch) -> Vec<String> {
+    let mut queries = vec![watch.query.clone()];
+    if let (Some(series), Some(n)) = (watch.series_title.as_deref(), watch.season_number) {
+        if n > 1 && !watch.is_movie() && nyaa::split_season(&watch.query).1.is_none() {
+            queries.push(format!("{series} Season {n}"));
+        }
+    }
+    queries
+}
+
 /// The anime's own titles, most specific first (see `nyaa::is_other_work`).
 fn watch_names(watch: &db::watches::Watch) -> Vec<String> {
     let mut names = vec![nyaa::split_season(&watch.query).0, nyaa::split_season(&watch.title).0];
@@ -353,7 +363,7 @@ pub async fn poll_watch(app: &AppHandle, state: &AppState, watch: &db::watches::
     let names = watch_names(watch);
     let result = nyaa::find_new_matches(
         &state.http,
-        &watch.query,
+        &search_queries(watch),
         &names,
         &watch.quality,
         &audio_langs,
@@ -689,7 +699,7 @@ pub async fn force_download_episode(
     let sub_langs = split_langs(&watch.sub_lang);
     let best = crate::sources::nyaa::find_best_for_episode(
         &state.http,
-        &watch.query,
+        &search_queries(&watch),
         &watch.quality,
         &audio_langs,
         &sub_langs,
@@ -1308,12 +1318,13 @@ pub async fn backfill_series(app: AppHandle) {
             }
         }
     }
-    for watch in watches.into_iter().filter(|w| w.series_anilist_id.is_none()) {
+    for watch in watches
+        .into_iter()
+        .filter(|w| w.series_anilist_id.is_none() || (w.season_number.is_none() && !w.is_movie()))
+    {
         let Some(anilist_id) = watch.anilist_id else { continue };
-        if let Some((series_id, series_title)) =
-            crate::commands::watches::resolve_series(&state.http, anilist_id).await
-        {
-            let _ = db::watches::set_series(&state.db, watch.id, series_id, &series_title).await;
+        if let Some(series) = crate::commands::watches::resolve_series(&state.http, anilist_id).await {
+            let _ = db::watches::set_series(&state.db, watch.id, series.anilist_id, &series.title, series.season_number).await;
         }
     }
 }

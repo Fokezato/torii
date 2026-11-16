@@ -33,6 +33,7 @@ pub struct Watch {
     pub delete_after_watched: Option<bool>,
     /// AniList format: TV, MOVIE, OVA...
     pub format: Option<String>,
+    pub season_number: Option<i64>,
 }
 
 impl Watch {
@@ -67,6 +68,8 @@ pub struct NewWatch {
     pub series_anilist_id: Option<i64>,
     #[serde(skip)]
     pub series_title: Option<String>,
+    #[serde(skip)]
+    pub season_number: Option<i64>,
 }
 
 fn sanitize_folder_name(name: &str) -> String {
@@ -128,6 +131,7 @@ pub async fn create(pool: &SqlitePool, library_root: &str, w: NewWatch) -> Resul
     .bind(w.strip_audio.unwrap_or(false))
     .bind(w.series_anilist_id)
     .bind(&w.series_title)
+    .bind(w.season_number)
     .bind(w.streaming.unwrap_or(false))
     .bind(&w.format)
     .bind(&now)
@@ -138,10 +142,17 @@ pub async fn create(pool: &SqlitePool, library_root: &str, w: NewWatch) -> Resul
     get(pool, id).await
 }
 
-pub async fn set_series(pool: &SqlitePool, id: i64, series_anilist_id: i64, series_title: &str) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE watches SET series_anilist_id = ?, series_title = ? WHERE id = ?")
+pub async fn set_series(
+    pool: &SqlitePool,
+    id: i64,
+    series_anilist_id: i64,
+    series_title: &str,
+    season_number: Option<i64>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE watches SET series_anilist_id = ?, series_title = ?, season_number = ? WHERE id = ?")
         .bind(series_anilist_id)
         .bind(series_title)
+        .bind(season_number)
         .bind(id)
         .execute(pool)
         .await?;
