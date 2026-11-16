@@ -64,6 +64,7 @@ jobs:
           curl -sSL -o appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
           chmod +x appimagetool
           rm "$f"
+          chmod -R a+rX squashfs-root
           ARCH=x86_64 ./appimagetool squashfs-root "$f"
           rm -rf squashfs-root appimagetool
 
